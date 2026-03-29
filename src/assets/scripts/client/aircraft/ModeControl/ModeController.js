@@ -371,7 +371,10 @@ export default class ModeController {
      */
     initializeForAirborneFlight(bottomAltitude, airspaceCeiling, currentAltitude, currentHeading, currentSpeed) {
         // ensure aircraft will always descend at least to reach our airspace ceiling
-        const descentAltitude = Math.min(bottomAltitude, airspaceCeiling, currentAltitude);
+        // but never below FL150 without ATC clearance (realistic behavior)
+        const minimumAutonomousAltitude = 15000;
+        const clampedBottom = Math.max(bottomAltitude, minimumAutonomousAltitude);
+        const descentAltitude = Math.min(clampedBottom, airspaceCeiling, currentAltitude);
 
         this.setAltitudeFieldValue(descentAltitude);
         this.setAltitudeVnav();

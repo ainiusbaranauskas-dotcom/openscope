@@ -115,7 +115,7 @@ export const DATA_BLOCK_THEME = {
      * @memberof DATA_BLOCK_THEME
      * @property HALF_HEIGHT
      */
-    HALF_HEIGHT: 16,
+    HALF_HEIGHT: 22,
 
     /**
      * One half of the width of a data block
@@ -131,7 +131,7 @@ export const DATA_BLOCK_THEME = {
      * @memberof DATA_BLOCK_THEME
      * @property HEIGHT
      */
-    HEIGHT: 32,
+    HEIGHT: 44,
 
     /**
      * Direction to extend the data block away from the target

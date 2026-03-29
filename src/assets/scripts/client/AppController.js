@@ -19,10 +19,13 @@ import SpawnPatternCollection from './trafficGenerator/SpawnPatternCollection';
 import SpawnScheduler from './trafficGenerator/SpawnScheduler';
 import UiController from './ui/UiController';
 import ScoreController from './game/ScoreController';
+import CoopController from './coop/CoopController';
+import CoopViewController from './coop/CoopViewController';
 import { speech_init } from './speech';
-import { EVENT } from './constants/eventNames';
+import { EVENT, COOP_EVENT } from './constants/eventNames';
 import { SELECTORS } from './constants/selectors';
 import { TRACKABLE_EVENT } from './constants/trackableEvents';
+import FlightProfileLogger from './debug/FlightProfileLogger';
 
 /**
  * Root controller class
@@ -57,6 +60,8 @@ export default class AppController {
         this.inputController = null;
         this.canvasController = null;
         this.changelogController = null;
+        this.coopController = null;
+        this.coopViewController = null;
 
         return this._init()
             .setupHandlers()
@@ -184,6 +189,7 @@ export default class AppController {
         // this allows for any module file to call window.{module}.{method} and will make the transition to
         // explicit instance parameters easier.
         window.aircraftController = this.aircraftController;
+        window.flightLogger = new FlightProfileLogger();
 
         UiController.init(this.$element);
 
@@ -193,6 +199,25 @@ export default class AppController {
         this.airportInfoController = new AirportInfoController(this.$element);
         this.airportGuideController = new AirportGuideViewController(this.$element, airportGuideData, initialAirportData.icao);
         this.changelogController = new ChangelogController(this.contentQueue);
+
+        this.coopController = new CoopController(this.aircraftController, this.inputController);
+        this.coopViewController = new CoopViewController(this.$element, this.coopController);
+        this.inputController.setCoopController(this.coopController);
+        this.aircraftController.setCoopController(this.coopController);
+
+        // When joining as guest, clear local aircraft — host will sync state
+        this._eventBus.on(COOP_EVENT.ROOM_JOINED, () => {
+            this.aircraftController.aircraft_remove_all();
+            this.scopeModel.radarTargetCollection.reset();
+            GameController.destroyTimers();
+        });
+
+        // Display command result readbacks from host on guest
+        this._eventBus.on(COOP_EVENT.COMMAND_RESULT, (data) => {
+            const message = data.responseText || data.callsign;
+
+            UiController.ui_log(message, data.isWarning);
+        });
 
         this.updateViewControls();
     }
@@ -284,6 +309,13 @@ export default class AppController {
     onAirportChange(nextAirportJson) {
         if (!AirportController.current) {
             // if `current` is null, then this is the initial load and we dont need to reset andything
+            return;
+        }
+
+        // Prevent airport changes while in coop mode
+        if (this.coopController && this.coopController.isCoop) {
+            UiController.ui_log('Cannot change airport while in coop mode', true);
+
             return;
         }
 

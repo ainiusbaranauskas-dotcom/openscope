@@ -752,6 +752,77 @@ export default class Fms {
     }
 
     /**
+     * Returns all remaining waypoints that have altitude or speed restrictions,
+     * along with their cumulative along-route distance from the aircraft's current position.
+     *
+     * Distances are cumulated waypoint-to-waypoint along the route (not straight-line),
+     * providing more accurate descent/deceleration planning on curved routes.
+     *
+     * @for Fms
+     * @method getAllRestrictedWaypointsWithDistances
+     * @param aircraftPositionModel {DynamicPositionModel} the aircraft's current position
+     * @return {array<{waypoint: WaypointModel, cumulativeDistanceNm: number}>}
+     */
+    getAllRestrictedWaypointsWithDistances(aircraftPositionModel) {
+        const allWaypoints = this.waypoints;
+        const result = [];
+        let cumulativeDistance = 0;
+        let previousPosition = aircraftPositionModel;
+
+        for (let i = 0; i < allWaypoints.length; i++) {
+            const waypoint = allWaypoints[i];
+
+            if (!waypoint.positionModel) {
+                continue;
+            }
+
+            cumulativeDistance += previousPosition.distanceToPosition(waypoint.positionModel);
+            previousPosition = waypoint.positionModel;
+
+            if (waypoint.hasRestriction) {
+                result.push({
+                    waypoint,
+                    cumulativeDistanceNm: cumulativeDistance
+                });
+            }
+        }
+
+        return result;
+    }
+
+    /**
+     * Returns the cumulative along-route distance from the aircraft to a specified waypoint
+     *
+     * @for Fms
+     * @method getDistanceAlongRouteToWaypoint
+     * @param aircraftPositionModel {DynamicPositionModel} the aircraft's current position
+     * @param targetWaypointModel {WaypointModel} the target waypoint
+     * @return {number} distance in nautical miles, or -1 if waypoint not found
+     */
+    getDistanceAlongRouteToWaypoint(aircraftPositionModel, targetWaypointModel) {
+        const allWaypoints = this.waypoints;
+        let cumulativeDistance = 0;
+        let previousPosition = aircraftPositionModel;
+
+        for (let i = 0; i < allWaypoints.length; i++) {
+            const waypoint = allWaypoints[i];
+
+            if (!waypoint.positionModel) {
+                continue;
+            }
+
+            cumulativeDistance += previousPosition.distanceToPosition(waypoint.positionModel);
+            previousPosition = waypoint.positionModel;
+
+            if (waypoint.name === targetWaypointModel.name) {
+                return cumulativeDistance;
+            }
+        }
+
+        return -1;
+    }
+
+    /**
      * Returns the highest top altitude of any `LegModel` in the `#_legCollection`
      *
      * @for LegModel

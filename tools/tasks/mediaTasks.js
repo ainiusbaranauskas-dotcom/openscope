@@ -15,7 +15,9 @@ module.exports = function(gulp, config) {
         .pipe(jsonmin())
         .pipe(gulp.dest(OPTIONS.DIR.DIST_AIRPORTS));
 
-    const copyAirportFiles = () => gulp.src(OPTIONS.GLOB.STATIC_AIRPORTS)
+    const copyAirportFiles = () => gulp.src([
+            OPTIONS.GLOB.STATIC_AIRPORTS
+        ])
         .pipe(gulp.dest(OPTIONS.DIR.DIST_AIRPORTS));;
 
     const copyStatic = () => {

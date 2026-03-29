@@ -23,6 +23,7 @@ import { speech_say } from '../speech';
 import { generateTransponderCode, isDiscreteTransponderCode, isValidTransponderCode } from '../utilities/transponderUtilities';
 import { km } from '../utilities/unitConverters';
 import { isEmptyOrNotArray } from '../utilities/validatorUtilities';
+import DynamicPositionModel from '../base/DynamicPositionModel';
 import { FLIGHT_CATEGORY, FLIGHT_PHASE } from '../constants/aircraftConstants';
 import { EVENT, AIRCRAFT_EVENT } from '../constants/eventNames';
 import { GAME_OPTION_NAMES } from '../constants/gameOptionConstants';
@@ -149,6 +150,8 @@ export default class AircraftController {
          */
         this._stripViewController = new StripViewController();
 
+        this._coopController = null;
+
         return this.init()
             ._setupHandlers()
             .enable();
@@ -163,6 +166,154 @@ export default class AircraftController {
      */
     get aircraftCommander() {
         return this._aircraftCommander;
+    }
+
+    setCoopController(coopController) {
+        this._coopController = coopController;
+
+        if (coopController) {
+            this._eventBus.on('coop-aircraft-spawn', (data) => this._onRemoteAircraftSpawn(data));
+            this._eventBus.on('coop-aircraft-remove', (data) => this._onRemoteAircraftRemove(data));
+        }
+    }
+
+    applyRemoteState(aircraftStates) {
+        if (!aircraftStates) {
+            return;
+        }
+
+        this._remoteSyncCount = (this._remoteSyncCount || 0) + 1;
+        const referencePosition = AirportController.airport_get().positionModel;
+        let matched = 0;
+        let missed = 0;
+
+        for (let i = 0; i < aircraftStates.length; i++) {
+            const state = aircraftStates[i];
+            const aircraft = this.findAircraftByCallsign(state.callsign);
+
+            if (!aircraft) {
+                missed++;
+
+                continue;
+            }
+
+            matched++;
+
+            // Convert relative position back to GPS coordinates for the position model
+            const relativePos = [state.posX, state.posY];
+            const gpsCoordinates = DynamicPositionModel.calculateGpsCoordinatesFromRelativePosition(
+                relativePos,
+                referencePosition
+            );
+
+            // Log first sync for first aircraft to verify position conversion
+            if (this._remoteSyncCount <= 2 && i === 0) {
+                console.log('[Coop] applyRemoteState sample:', {
+                    callsign: state.callsign,
+                    inputRelPos: relativePos,
+                    outputGps: gpsCoordinates,
+                    currentRelPos: aircraft.positionModel.relativePosition,
+                    currentGps: aircraft.positionModel.gps,
+                    posModelType: aircraft.positionModel.constructor.name
+                });
+            }
+
+            aircraft.positionModel.setCoordinates(gpsCoordinates);
+
+            // Verify the position actually changed
+            if (this._remoteSyncCount <= 2 && i === 0) {
+                console.log('[Coop] after setCoordinates:', {
+                    newRelPos: aircraft.positionModel.relativePosition,
+                    newGps: aircraft.positionModel.gps
+                });
+            }
+
+            aircraft.heading = state.heading;
+            aircraft.altitude = state.altitude;
+            aircraft.speed = state.speed;
+            aircraft.groundSpeed = state.groundSpeed;
+            aircraft.groundTrack = state.groundTrack;
+            aircraft.isControllable = state.isControllable;
+            aircraft.trend = state.trend;
+
+            if (aircraft.mcp) {
+                aircraft.mcp._altitude = state.mcpAltitude;
+                aircraft.mcp._heading = state.mcpHeading;
+                aircraft.mcp._speed = state.mcpSpeed;
+            }
+
+            aircraft.transponderCode = state.transponderCode;
+        }
+
+        if (this._remoteSyncCount <= 3) {
+            console.log(`[Coop] applyRemoteState #${this._remoteSyncCount}: matched=${matched}, missed=${missed}, total=${aircraftStates.length}`);
+        }
+    }
+
+    _onRemoteAircraftSpawn(data) {
+        if (!this._coopController || !this._coopController.isGuest) {
+            console.warn('[Coop] _onRemoteAircraftSpawn skipped: isGuest=', this._coopController && this._coopController.isGuest);
+
+            return;
+        }
+
+        console.log('[Coop] Spawning remote aircraft:', data.callsign, 'type:', data.icao, 'cat:', data.category);
+
+        try {
+            const positionModel = new DynamicPositionModel(
+                data.positionGps,
+                AirportController.airport_get().positionModel,
+                AirportController.airport_get().magneticNorth
+            );
+            const aircraftTypeDefinition = this.aircraftTypeDefinitionCollection.findAircraftTypeDefinitionModelByIcao(data.icao);
+
+            if (!aircraftTypeDefinition) {
+                console.warn(`[Coop] Unknown aircraft type: ${data.icao}`);
+
+                return;
+            }
+
+            const initProps = {
+                fleet: data.fleet,
+                altitude: data.altitude,
+                transponderCode: data.transponderCode,
+                origin: data.origin,
+                destination: data.destination,
+                callsign: data.callsign,
+                category: data.category,
+                airline: data.airline,
+                airlineCallsign: data.airlineCallsign,
+                speed: data.speed,
+                heading: data.heading,
+                positionModel,
+                icao: data.icao,
+                model: aircraftTypeDefinition,
+                routeString: data.routeString
+            };
+
+            this._createAircraftWithInitializationProps(initProps);
+
+            // Verify it was added
+            const created = this.findAircraftByCallsign(data.callsign);
+
+            console.log('[Coop] Aircraft created?', !!created, 'callsign:', data.callsign,
+                'list length:', this.aircraft.list.length,
+                'list callsigns:', this.aircraft.list.map((a) => a.callsign).join(','));
+        } catch (error) {
+            console.error('[Coop] Failed to spawn aircraft:', data.callsign, error.message, error.stack);
+        }
+    }
+
+    _onRemoteAircraftRemove(data) {
+        if (!this._coopController || !this._coopController.isGuest) {
+            return;
+        }
+
+        const aircraft = this.findAircraftByCallsign(data.callsign);
+
+        if (aircraft) {
+            this.aircraft_remove(aircraft);
+        }
     }
 
     /**
@@ -243,7 +394,33 @@ export default class AircraftController {
      * @private
      */
     createAircraftWithSpawnPatternModel = (spawnPatternModel) => {
+        const spawnOverride = spawnPatternModel.getRandomizedSpawnPositionAndHeading();
+        const spawnPosition = spawnOverride
+            ? spawnOverride.positionModel.relativePosition
+            : spawnPatternModel.relativePosition;
+        const MIN_SPAWN_SEPARATION_KM = km(8);
+
+        for (let i = 0; i < this.aircraft.list.length; i++) {
+            const existingAircraft = this.aircraft.list[i];
+
+            if (existingAircraft.hit) {
+                continue;
+            }
+
+            const dist = distance2d(existingAircraft.relativePosition, spawnPosition);
+
+            if (dist < MIN_SPAWN_SEPARATION_KM) {
+                // Too close — skip this spawn, the scheduler will try again on next cycle
+                return;
+            }
+        }
+
         const initializationProps = this._buildAircraftProps(spawnPatternModel);
+
+        if (spawnOverride) {
+            initializationProps.positionModel = spawnOverride.positionModel;
+            initializationProps.heading = spawnOverride.heading;
+        }
 
         this._createAircraftWithInitializationProps(initializationProps);
     }
@@ -267,9 +444,29 @@ export default class AircraftController {
      */
     createPreSpawnAircraftWithSpawnPatternModel = (spawnPatternModel) => {
         const isPreSpawn = true;
+        const MIN_SPAWN_SEPARATION_KM = km(8);
 
         for (let i = 0; i < spawnPatternModel.preSpawnAircraftList.length; i++) {
             const preSpawnHeadingAndPosition = spawnPatternModel.preSpawnAircraftList[i];
+            const preSpawnPosition = preSpawnHeadingAndPosition.positionModel.relativePosition;
+
+            // Proximity check: skip if any existing aircraft is within 8nm
+            let tooClose = false;
+
+            for (let j = 0; j < this.aircraft.list.length; j++) {
+                const dist = distance2d(this.aircraft.list[j].relativePosition, preSpawnPosition);
+
+                if (dist < MIN_SPAWN_SEPARATION_KM) {
+                    tooClose = true;
+
+                    break;
+                }
+            }
+
+            if (tooClose) {
+                continue;
+            }
+
             const baseAircraftProps = this._buildAircraftProps(spawnPatternModel, isPreSpawn);
             const initializationProps = Object.assign({}, baseAircraftProps, preSpawnHeadingAndPosition);
 
@@ -340,6 +537,11 @@ export default class AircraftController {
      * @param aircraftModel {AircraftModel}
      */
     aircraft_remove(aircraftModel) {
+        // Broadcast removal to guest in coop mode
+        if (this._coopController && this._coopController.isHost) {
+            this._coopController.broadcastAircraftRemove(aircraftModel.callsign);
+        }
+
         AirportController.removeAircraftFromAllRunwayQueues(aircraftModel);
         this.removeFlightNumberFromList(aircraftModel);
         this.removeAircraftModelFromList(aircraftModel);
@@ -363,12 +565,24 @@ export default class AircraftController {
             return;
         }
 
+        const isGuest = this._coopController && this._coopController.isGuest;
+
         // TODO: this is getting better, but still needs more simplification
         for (let i = 0; i < this.aircraft.list.length; i++) {
             const aircraftModel = this.aircraft.list[i];
 
-            aircraftModel.update();
+            // Guest skips physics — position comes from network state sync
+            if (!isGuest) {
+                aircraftModel.update();
+            }
+
             aircraftModel.updateWarning();
+
+            // Guest skips conflict checking, visibility updates, and scoring
+            // since those are handled by the host and synced via network
+            if (isGuest) {
+                continue;
+            }
 
             // TODO: conflict checking eats up a lot of resources when there are more than
             //       30 aircraft, exit early if we're still taxiing
@@ -591,6 +805,28 @@ export default class AircraftController {
 
             this._runCommandOnPreSpawnAircraft(aircraftModel, runwayCommands, aircraftModel.fms.departureRunwayModel.name);
         }
+
+        // Broadcast spawn to guest in coop mode
+        if (this._coopController && this._coopController.isHost) {
+            const spawnData = {
+                fleet: initializationProps.fleet,
+                altitude: initializationProps.altitude,
+                transponderCode: initializationProps.transponderCode,
+                origin: initializationProps.origin,
+                destination: initializationProps.destination,
+                callsign: initializationProps.callsign,
+                category: initializationProps.category,
+                airline: initializationProps.airline,
+                airlineCallsign: initializationProps.airlineCallsign,
+                speed: initializationProps.speed,
+                heading: initializationProps.heading,
+                icao: initializationProps.icao,
+                routeString: initializationProps.routeString,
+                positionGps: initializationProps.positionModel.gps
+            };
+
+            this._coopController.broadcastAircraftSpawn(spawnData);
+        }
     }
 
     /**
@@ -669,10 +905,21 @@ export default class AircraftController {
             return;
         }
 
+        // Save MCP altitude before running spawn commands — the cross commands set
+        // waypoint restrictions (used by VNAV) but also override MCP altitude to low
+        // values. We preserve the initialized MCP altitude (e.g. FL150 floor) so
+        // aircraft don't descend below it without ATC clearance.
+        const savedMcpAltitude = aircraft.mcp.altitude;
+        const savedAltitudeMode = aircraft.mcp.altitudeMode;
+
         const commandString = commands[runwayName];
         const command = new CommandParser(`${aircraft.getCallsign()} ${commandString}`).parse();
 
         this._aircraftCommander.runCommands(aircraft, command.args, true);
+
+        // Restore MCP altitude — waypoint restrictions are preserved on the waypoints
+        // themselves, and VNAV descent planning will use them appropriately
+        aircraft.mcp.setAltitudeFieldValue(savedMcpAltitude);
     }
 
     /**

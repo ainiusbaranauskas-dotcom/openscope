@@ -1,0 +1,43 @@
+<div id="coop-lobby" class="dialog notSelectable">
+    <div class="dialog-title">Coop Mode</div>
+    <div class="dialog-body">
+        <div id="coop-lobby-menu">
+            <div class="coop-section">
+                <button id="coop-create-btn" class="coop-btn">Create Room</button>
+            </div>
+            <div class="coop-section coop-divider">
+                <span class="coop-or">or</span>
+            </div>
+            <div class="coop-section">
+                <input id="coop-join-code"
+                       type="text"
+                       maxlength="4"
+                       placeholder="Room code"
+                       autocapitalize="characters"
+                       autocorrect="off"
+                       autocomplete="off"
+                       spellcheck="false" />
+                <button id="coop-join-btn" class="coop-btn">Join Room</button>
+            </div>
+        </div>
+        <div id="coop-lobby-waiting" class="hidden">
+            <div class="coop-status">
+                <span>Room Code:</span>
+                <span id="coop-room-code" class="coop-code"></span>
+            </div>
+            <div id="coop-waiting-text" class="coop-status-text">Waiting for partner...</div>
+        </div>
+        <div id="coop-lobby-connected" class="hidden">
+            <div class="coop-status">
+                <span>Room Code:</span>
+                <span id="coop-connected-code" class="coop-code"></span>
+            </div>
+            <div class="coop-status-text coop-connected">Partner connected!</div>
+        </div>
+        <div id="coop-error" class="coop-error hidden"></div>
+    </div>
+    <div class="dialog-footer">
+        <button id="coop-close-btn" class="coop-btn coop-btn-secondary">Close</button>
+        <button id="coop-leave-btn" class="coop-btn coop-btn-secondary hidden">Leave Room</button>
+    </div>
+</div>

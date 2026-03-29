@@ -54,7 +54,12 @@ export const KEY_CODES = {
     F11: 'F11',
     F12: 'F12',
     // `
-    BACKQUOTE: 'Backquote'
+    BACKQUOTE: 'Backquote',
+    // m - measure tool toggle
+    KEY_M: 'KeyM',
+    // z - undo measure point
+    KEY_Z: 'KeyZ',
+    BACKSPACE: 'Backspace'
 };
 
 /**

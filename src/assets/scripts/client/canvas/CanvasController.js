@@ -167,20 +167,49 @@ export default class CanvasController {
         /**
          * Flag used to determine if the sid map should be displayed
          *
-         * @property _shouldDrawSidMap
-         * @type {boolean}
-         * @default false
+         * Display mode for SID map: 'none', 'all', '01', '19'
+         *
+         * @property _sidDisplayMode
+         * @type {string}
+         * @default 'none'
          */
-        this._shouldDrawSidMap = false;
+        this._sidDisplayMode = 'none';
 
         /**
-         * Flag used to determine if the star map should be displayed
+         * Display mode for STAR map: 'none', 'all', '01', '19'
          *
-         * @property _shouldDrawStarMap
+         * @property _starDisplayMode
+         * @type {string}
+         * @default 'none'
+         */
+        this._starDisplayMode = 'none';
+
+        /**
+         * Flag used to determine if STAR fix name labels should be displayed
+         *
+         * @property _shouldDrawStarFixLabels
          * @type {boolean}
          * @default false
          */
-        this._shouldDrawStarMap = false;
+        this._shouldDrawStarFixLabels = false;
+
+        /**
+         * Flag used to determine if IAF fix markers should be displayed
+         *
+         * @property _shouldDrawIafFixes
+         * @type {boolean}
+         * @default false
+         */
+        this._shouldDrawIafFixes = false;
+
+        /**
+         * Flag used to determine if extended runway centerlines should be displayed
+         *
+         * @property _shouldDrawRunwayCenterline
+         * @type {boolean}
+         * @default true
+         */
+        this._shouldDrawRunwayCenterline = true;
 
         /**
          * Flag used to determine if terrain should be displayed
@@ -246,6 +275,9 @@ export default class CanvasController {
         this._onToggleRestrictedAreasHandler = this._onToggleRestrictedAreas.bind(this);
         this._onToggleSidMapHandler = this._onToggleSidMap.bind(this);
         this._onToggleStarMapHandler = this._onToggleStarMap.bind(this);
+        this._onToggleStarFixLabelsHandler = this._onToggleStarFixLabels.bind(this);
+        this._onToggleIafFixesHandler = this._onToggleIafFixes.bind(this);
+        this._onToggleRunwayCenterlineHandler = this._onToggleRunwayCenterline.bind(this);
         this._onAirportChangeHandler = this._onAirportChange.bind(this);
         this._onToggleTerrainHandler = this._onToggleTerrain.bind(this);
         this._onToggleVideoMapHandler = this._onToggleVideoMap.bind(this);
@@ -274,6 +306,9 @@ export default class CanvasController {
         this._eventBus.on(EVENT.TOGGLE_RESTRICTED_AREAS, this._onToggleRestrictedAreasHandler);
         this._eventBus.on(EVENT.TOGGLE_SID_MAP, this._onToggleSidMapHandler);
         this._eventBus.on(EVENT.TOGGLE_STAR_MAP, this._onToggleStarMapHandler);
+        this._eventBus.on(EVENT.TOGGLE_STAR_FIX_LABELS, this._onToggleStarFixLabelsHandler);
+        this._eventBus.on(EVENT.TOGGLE_IAF_FIXES, this._onToggleIafFixesHandler);
+        this._eventBus.on(EVENT.TOGGLE_RUNWAY_CENTERLINE, this._onToggleRunwayCenterlineHandler);
         this._eventBus.on(EVENT.TOGGLE_TERRAIN, this._onToggleTerrainHandler);
         this._eventBus.on(EVENT.TOGGLE_VIDEO_MAP, this._onToggleVideoMapHandler);
         this._eventBus.on(EVENT.RANGE_RINGS_CHANGE, this._onRangeRingsChangeHandler);
@@ -302,6 +337,9 @@ export default class CanvasController {
         this._eventBus.off(EVENT.TOGGLE_RESTRICTED_AREAS, this._onToggleRestrictedAreas);
         this._eventBus.off(EVENT.TOGGLE_SID_MAP, this._onToggleSidMap);
         this._eventBus.off(EVENT.TOGGLE_STAR_MAP, this._onToggleStarMap);
+        this._eventBus.off(EVENT.TOGGLE_STAR_FIX_LABELS, this._onToggleStarFixLabelsHandler);
+        this._eventBus.off(EVENT.TOGGLE_IAF_FIXES, this._onToggleIafFixesHandler);
+        this._eventBus.off(EVENT.TOGGLE_RUNWAY_CENTERLINE, this._onToggleRunwayCenterlineHandler);
         this._eventBus.off(EVENT.TOGGLE_TERRAIN, this._onToggleTerrain);
         this._eventBus.off(EVENT.TOGGLE_VIDEO_MAP, this._onToggleVideoMapHandler);
         this._eventBus.off(EVENT.RANGE_RINGS_CHANGE, this._onRangeRingsChangeHandler);
@@ -325,8 +363,11 @@ export default class CanvasController {
         this._shouldDeepRender = true;
         this._shouldDrawFixLabels = false;
         this._shouldDrawRestrictedAreas = false;
-        this._shouldDrawSidMap = false;
-        this._shouldDrawStarMap = false;
+        this._sidDisplayMode = 'none';
+        this._starDisplayMode = 'none';
+        this._shouldDrawStarFixLabels = false;
+        this._shouldDrawIafFixes = false;
+        this._shouldDrawRunwayCenterline = true;
         this._shouldDrawTerrain = true;
 
         return this;
@@ -416,6 +457,7 @@ export default class CanvasController {
             this._drawRestrictedAirspace(staticCanvasCtx);
             this._drawRunways(staticCanvasCtx);
             this._drawAirportFixesAndLabels(staticCanvasCtx);
+            this._drawIafFixes(staticCanvasCtx);
             this._drawSids(staticCanvasCtx);
             this._drawStars(staticCanvasCtx);
             this._drawAirspaceAndRangeRings(staticCanvasCtx);
@@ -532,19 +574,23 @@ export default class CanvasController {
             cc.lineTo(0, runwayLength);
             cc.stroke();
         } else { // extended centerlines
-            if (!runwayModel.ils.enabled) {
+            if (!runwayModel.ils.enabled || !this._shouldDrawRunwayCenterline) {
                 cc.restore();
 
                 return;
             }
 
-            cc.strokeStyle = this.theme.SCOPE.RUNWAY_EXTENDED_CENTERLINE;
+            cc.strokeStyle = 'rgba(200, 200, 200, 0.5)';
             cc.lineWidth = 1;
+            cc.setLineDash([8, 6]);
+
+            const extLen = CanvasStageModel._translateKilometersToPixels(runwayModel.ils.loc_maxDist);
 
             cc.beginPath();
             cc.moveTo(0, 0);
-            cc.lineTo(0, CanvasStageModel._translateKilometersToPixels(runwayModel.ils.loc_maxDist));
+            cc.lineTo(0, extLen);
             cc.stroke();
+            cc.setLineDash([]);
         }
 
         cc.restore();
@@ -707,19 +753,23 @@ export default class CanvasController {
 
         cc.save();
         cc.translate(...fixCanvasPosition);
-        cc.fillStyle = this.theme.SCOPE.FIX_FILL;
         cc.globalCompositeOperation = 'source-over';
-        cc.lineWidth = 1;
+        cc.lineWidth = 0.8;
+
+        // Small cross marker instead of large triangle
+        cc.strokeStyle = 'rgba(40, 80, 90, 0.6)';
         cc.beginPath();
-        cc.moveTo(0, -5);
-        cc.lineTo(4, 3);
-        cc.lineTo(-4, 3);
-        cc.closePath();
-        cc.fill();
-        cc.fillStyle = this.theme.SCOPE.FIX_TEXT;
+        cc.moveTo(0, -2.5);
+        cc.lineTo(0, 2.5);
+        cc.moveTo(-2.5, 0);
+        cc.lineTo(2.5, 0);
+        cc.stroke();
+
+        cc.fillStyle = 'rgba(40, 80, 90, 0.5)';
+        cc.font = '9px monoOne, monospace';
         cc.textAlign = 'center';
         cc.textBaseline = 'top';
-        cc.fillText(fixModel.name, 0, 6);
+        cc.fillText(fixModel.name, 0, 4);
         cc.restore();
     }
 
@@ -754,6 +804,86 @@ export default class CanvasController {
         cc.restore();
     }
 
+    /**
+     * Draw IAF (Initial Approach Fix) markers with distinct styling
+     *
+     * POSITIONING: Before calling this method, ensure NO TRANSLATION has occurred
+     *
+     * @for CanvasController
+     * @method _drawIafFixes
+     * @param cc {HTMLCanvasContext}
+     * @returns undefined
+     * @private
+     */
+    _drawIafFixes(cc) {
+        if (!this._shouldDrawIafFixes) {
+            return;
+        }
+
+        // EYVI IAF fixes
+        const IAF_FIX_NAMES = ['BILDI', 'INSOL', 'EKSAM', 'MIZOP', 'NOLNA', 'ODETU'];
+
+        cc.save();
+        this._ccTranslateFromCanvasOriginToAirportCenter(cc);
+
+        for (let i = 0; i < IAF_FIX_NAMES.length; i++) {
+            const fixName = IAF_FIX_NAMES[i];
+            const fixPosition = NavigationLibrary.getFixRelativePosition(fixName);
+
+            if (!fixPosition) {
+                continue;
+            }
+
+            const fixCanvasPosition = CanvasStageModel.calculateRoundedCanvasPositionFromRelativePosition(fixPosition);
+
+            cc.save();
+            cc.translate(...fixCanvasPosition);
+
+            // Draw small diamond shape for IAF
+            cc.strokeStyle = 'rgba(255, 200, 0, 0.5)';
+            cc.lineWidth = 0.8;
+            cc.beginPath();
+            cc.moveTo(0, -3.5);
+            cc.lineTo(3, 0);
+            cc.lineTo(0, 3.5);
+            cc.lineTo(-3, 0);
+            cc.closePath();
+            cc.stroke();
+
+            // Draw label
+            cc.fillStyle = 'rgba(255, 200, 0, 0.4)';
+            cc.font = '9px monoOne, monospace';
+            cc.textAlign = 'center';
+            cc.textBaseline = 'top';
+            cc.fillText(fixName, 0, 5);
+
+            cc.restore();
+        }
+
+        cc.restore();
+    }
+
+    /**
+     * Filter procedure lines by display mode
+     * Identifiers ending in 'A' are RWY 01, ending in 'B' are RWY 19
+     *
+     * @for CanvasController
+     * @method _filterProcedureLinesByMode
+     * @param procedureLines {array}
+     * @param mode {string} 'all', '01', or '19'
+     * @returns {array}
+     * @private
+     */
+    _filterProcedureLinesByMode(procedureLines, mode) {
+        if (mode === 'all') {
+            return procedureLines;
+        }
+
+        const suffix = mode === '01' ? 'A' : 'B';
+
+        return procedureLines.filter((procedure) => procedure.identifier.endsWith(suffix));
+    }
+
     // TODO: break this method up into smaller chunks
     /**
      * Draw SID lines and labels
@@ -767,19 +897,20 @@ export default class CanvasController {
      * @private
      */
     _drawSids(cc) {
-        if (!this._shouldDrawSidMap) {
+        if (this._sidDisplayMode === 'none') {
             return;
         }
 
         const textAtFix = [];
-        const sidLines = NavigationLibrary.getProcedureLines(PROCEDURE_TYPE.SID);
+        const allSidLines = NavigationLibrary.getProcedureLines(PROCEDURE_TYPE.SID);
+        const sidLines = this._filterProcedureLinesByMode(allSidLines, this._sidDisplayMode);
 
         cc.save();
         this._ccTranslateFromCanvasOriginToAirportCenter(cc);
         cc.strokeStyle = this.theme.SCOPE.SID;
         cc.fillStyle = this.theme.SCOPE.SID;
         cc.setLineDash([1, 10]);
-        cc.font = 'italic 14px monoOne, monospace';
+        cc.font = '10px monoOne, monospace';
 
         for (let i = 0; i < sidLines.length; i++) {
             const sid = sidLines[i];
@@ -835,11 +966,12 @@ export default class CanvasController {
      * @private
      */
     _drawStars(cc) {
-        if (!this._shouldDrawStarMap) {
+        if (this._starDisplayMode === 'none') {
             return;
         }
 
-        const starLines = NavigationLibrary.getProcedureLines(PROCEDURE_TYPE.STAR);
+        const allStarLines = NavigationLibrary.getProcedureLines(PROCEDURE_TYPE.STAR);
+        const starLines = this._filterProcedureLinesByMode(allStarLines, this._starDisplayMode);
         const textAtFix = [];
 
         cc.save();
@@ -847,7 +979,7 @@ export default class CanvasController {
         cc.strokeStyle = this.theme.SCOPE.STAR;
         cc.fillStyle = this.theme.SCOPE.STAR;
         cc.setLineDash([1, 10]);
-        cc.font = 'italic 14px monoOne, monospace';
+        cc.font = '10px monoOne, monospace';
         cc.textAlign = 'right';
 
         for (let i = 0; i < starLines.length; i++) {
@@ -866,12 +998,14 @@ export default class CanvasController {
             textAtFix[firstFixName].push(star.identifier);
         }
 
-        // draw labels
-        for (const fix in textAtFix) {
-            const textItemsToPrint = textAtFix[fix];
-            const fixPosition = NavigationLibrary.getFixRelativePosition(fix);
+        // draw labels (only if STAR fix labels toggle is enabled)
+        if (this._shouldDrawStarFixLabels) {
+            for (const fix in textAtFix) {
+                const textItemsToPrint = textAtFix[fix];
+                const fixPosition = NavigationLibrary.getFixRelativePosition(fix);
 
-            this._drawText(cc, fixPosition, textItemsToPrint);
+                this._drawText(cc, fixPosition, textItemsToPrint);
+            }
         }
 
         cc.restore();
@@ -1169,6 +1303,7 @@ export default class CanvasController {
 
         cc.fillStyle = this.theme.RADAR_TARGET.PROJECTED_TRACK_LINES;
         cc.strokeStyle = this.theme.RADAR_TARGET.PROJECTED_TRACK_LINES;
+        cc.lineWidth = 0.8;
 
         const lineLengthInMinutes = this._scopeModel.ptlLength;
         const lineLengthInHours = lineLengthInMinutes * TIME.ONE_MINUTE_IN_HOURS;
@@ -1573,6 +1708,30 @@ export default class CanvasController {
             aircraftModel.relativePosition
         );
         const leaderLength = this._calculateLeaderLength(radarTargetModel.dataBlockLeaderLength);
+
+        // If label has been dragged, rotate leader direction toward the dragged position
+        const dragOffset = radarTargetModel._dataBlockPixelOffset;
+        const hasDragOffset = dragOffset[0] !== 0 || dragOffset[1] !== 0;
+
+        if (hasDragOffset) {
+            // Calculate where the default block center would be (without drag)
+            const defaultBlockCenter = [
+                radarTargetPosition[0] + offsetComponent[0] * leaderLength,
+                radarTargetPosition[1] + offsetComponent[1] * leaderLength
+            ];
+            // Actual dragged position
+            const draggedX = defaultBlockCenter[0] + dragOffset[0];
+            const draggedY = defaultBlockCenter[1] + dragOffset[1];
+            // Direction from aircraft to dragged label
+            const dx = draggedX - radarTargetPosition[0];
+            const dy = draggedY - radarTargetPosition[1];
+            const dist = Math.sqrt(dx * dx + dy * dy);
+
+            if (dist > 1) {
+                offsetComponent = [dx / dist, dy / dist];
+            }
+        }
+
         const leaderStart = [
             radarTargetPosition[0] + (offsetComponent[0] * this.theme.DATA_BLOCK.LEADER_PADDING_FROM_TARGET_PX),
             radarTargetPosition[1] + (offsetComponent[1] * this.theme.DATA_BLOCK.LEADER_PADDING_FROM_TARGET_PX)
@@ -1587,6 +1746,7 @@ export default class CanvasController {
         ];
 
         cc.beginPath();
+        cc.lineWidth = 0.7;
         cc.moveTo(...leaderStart);
         cc.lineTo(...leaderEnd);
         cc.strokeStyle = white;
@@ -1594,19 +1754,19 @@ export default class CanvasController {
 
         const dataBlockCenterCanvasPosition = radarTargetModel.calculateDataBlockCenter(leaderIntersectionWithBlock);
 
+        // Store screen position for drag hit-testing
+        radarTargetModel.lastDataBlockScreenPosition = dataBlockCenterCanvasPosition;
+
         cc.translate(...dataBlockCenterCanvasPosition);
 
         this._drawLegacyDatablock(cc, aircraftModel);
 
         // height of TOTAL vertical space between the rows (0 for touching)
-        const gap = 3;
-        const lineheight = 4.5; // height of text row (used for spacing basis)
+        const gap = 4;
+        const lineheight = 5.5; // height of text row (used for spacing basis)
         const row1text = radarTargetModel.buildDataBlockRowOne();
-        let row2text = radarTargetModel.buildDataBlockRowTwoPrimaryInfo();
-
-        if (this.shouldShowSecondaryDataBlock()) {
-            row2text = radarTargetModel.buildDataBlockRowTwoSecondaryInfo();
-        }
+        const row2text = radarTargetModel.buildDataBlockRowTwoPrimaryInfo();
+        const row3text = radarTargetModel.buildDataBlockRowThree();
 
         const fillStyle = aircraftModel.isControllable ?
             this.theme.DATA_BLOCK.TEXT_IN_RANGE :
@@ -1614,11 +1774,13 @@ export default class CanvasController {
 
         cc.fillStyle = fillStyle;
 
-        // Draw full datablock text
+        // Draw full datablock text (3 rows: callsign, alt/speed, heading/type)
         cc.font = this.theme.DATA_BLOCK.TEXT_FONT;
         cc.textAlign = 'left';
-        cc.fillText(row1text, -this.theme.DATA_BLOCK.HALF_WIDTH + paddingLR, -gap / 2 - lineheight);
-        cc.fillText(row2text, -this.theme.DATA_BLOCK.HALF_WIDTH + paddingLR, gap / 2 + lineheight);
+        const leftX = -this.theme.DATA_BLOCK.HALF_WIDTH + paddingLR;
+        cc.fillText(row1text, leftX, -(gap + lineheight));
+        cc.fillText(row2text, leftX, 0);
+        cc.fillText(row3text, leftX, (gap + lineheight));
         cc.font = BASE_CANVAS_FONT;
 
         cc.restore();
@@ -1847,29 +2009,8 @@ export default class CanvasController {
      * @private
      */
     _drawRangeRings(cc) {
-        const airportModel = AirportController.airport_get();
-        const centerCanvasPosition = CanvasStageModel.calculatePreciseCanvasPositionFromRelativePosition(
-            airportModel.rangeRings.center.relativePosition
-        );
-        const ringRadiusKm = this._calculateRangeRingRadiusKm(airportModel);
-
-        if (ringRadiusKm === 0) { // prevent infinite loop
-            return;
-        }
-
-        cc.save();
-
-        cc.linewidth = 1;
-        cc.strokeStyle = this.theme.SCOPE.RANGE_RING_COLOR;
-
-        // Fill up airportModel's ctr_radius with rings of the specified radius
-        for (let i = 1; i * ringRadiusKm < airportModel.ctr_radius * 3; i++) {
-            cc.beginPath();
-            cc.arc(...centerCanvasPosition, ringRadiusKm * CanvasStageModel.scale * i, 0, tau());
-            cc.stroke();
-        }
-
-        cc.restore();
+        // Range rings disabled
+        return;
     }
 
     /**
@@ -1892,6 +2033,10 @@ export default class CanvasController {
 
         for (let i = 0; i < airport.airspace.length; i++) {
             const airspace = airport.airspace[i];
+
+            if (airspace.hidden) {
+                continue;
+            }
 
             this._drawRelativePoly(cc, airspace.relativePoly, true);
         }
@@ -1930,6 +2075,10 @@ export default class CanvasController {
 
         for (let i = 0; i < airport.airspace.length; i++) {
             const airspace = airport.airspace[i];
+
+            if (airspace.hidden) {
+                continue;
+            }
 
             cc.save(); // to allow reset of translation
             // required positioning to use _drawPoly
@@ -2610,7 +2759,9 @@ export default class CanvasController {
      * @private
      */
     _onToggleSidMap() {
-        this._shouldDrawSidMap = !this._shouldDrawSidMap;
+        const MODES = ['none', 'all', '01', '19'];
+        const currentIndex = MODES.indexOf(this._sidDisplayMode);
+        this._sidDisplayMode = MODES[(currentIndex + 1) % MODES.length];
 
         this._markDeepRender();
     }
@@ -2627,7 +2778,51 @@ export default class CanvasController {
      * @private
      */
     _onToggleStarMap() {
-        this._shouldDrawStarMap = !this._shouldDrawStarMap;
+        const MODES = ['none', 'all', '01', '19'];
+        const currentIndex = MODES.indexOf(this._starDisplayMode);
+        this._starDisplayMode = MODES[(currentIndex + 1) % MODES.length];
+
+        this._markDeepRender();
+    }
+
+    /**
+     * Toggle display of STAR fix name labels
+     *
+     * @for CanvasController
+     * @method _onToggleStarFixLabels
+     * @returns undefined
+     * @private
+     */
+    _onToggleStarFixLabels() {
+        this._shouldDrawStarFixLabels = !this._shouldDrawStarFixLabels;
+
+        this._markDeepRender();
+    }
+
+    /**
+     * Toggle display of IAF (Initial Approach Fix) markers
+     *
+     * @for CanvasController
+     * @method _onToggleIafFixes
+     * @returns undefined
+     * @private
+     */
+    _onToggleIafFixes() {
+        this._shouldDrawIafFixes = !this._shouldDrawIafFixes;
+
+        this._markDeepRender();
+    }
+
+    /**
+     * Toggle display of extended runway centerlines
+     *
+     * @for CanvasController
+     * @method _onToggleRunwayCenterline
+     * @returns undefined
+     * @private
+     */
+    _onToggleRunwayCenterline() {
+        this._shouldDrawRunwayCenterline = !this._shouldDrawRunwayCenterline;
 
         this._markDeepRender();
     }

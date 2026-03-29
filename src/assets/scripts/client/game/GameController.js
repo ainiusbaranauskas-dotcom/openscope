@@ -318,12 +318,18 @@ class GameController {
      * @method game_timewarp_toggle
      */
     game_timewarp_toggle() {
-        if (TimeKeeper.simulationRate >= 5) {
+        if (TimeKeeper.simulationRate >= 15) {
             this.updateTimescale(1);
         } else if (TimeKeeper.simulationRate === 1) {
             this.updateTimescale(2);
-        } else {
+        } else if (TimeKeeper.simulationRate === 2) {
             this.updateTimescale(5);
+        } else if (TimeKeeper.simulationRate === 5) {
+            this.updateTimescale(10);
+        } else if (TimeKeeper.simulationRate === 10) {
+            this.updateTimescale(15);
+        } else {
+            this.updateTimescale(1);
         }
     }
 

@@ -523,6 +523,14 @@ export default class SpawnPatternModel extends BaseModel {
         this._setCyclePeriodAndOffset(spawnPatternJson);
         this._initializePositionAndHeadingForAirborneAircraft(spawnPatternJson);
         this._setMinMaxAltitude(spawnPatternJson.altitude);
+
+        // Auto-upgrade random arrivals/overflights to wave for natural rate variation
+        if (this.method === SPAWN_METHOD.RANDOM && this.category !== FLIGHT_CATEGORY.DEPARTURE) {
+            this.method = SPAWN_METHOD.WAVE;
+            this.period = _random(20, 40) * 60;                    // 20-40 min cycle
+            this.variation = this.rate * _random(0.3, 0.5, true);  // 30-50% swing
+            this.offset = _random(0, this.period);                  // random phase
+        }
     }
 
     /**
@@ -600,6 +608,39 @@ export default class SpawnPatternModel extends BaseModel {
         const airlineId = this._weightedAirlineList[index];
 
         return airlineId;
+    }
+
+    /**
+     * Generate a randomized spawn position offset along the first leg of the route.
+     * Returns position and heading for the aircraft, or null to use the default entry fix.
+     *
+     * Only applies to arrivals/overflights — departures spawn on the ground.
+     * Offset range: 0–5nm along the route from the entry fix.
+     *
+     * @for SpawnPatternModel
+     * @method getRandomizedSpawnPositionAndHeading
+     * @return {object|null} { positionModel, heading } or null
+     */
+    getRandomizedSpawnPositionAndHeading() {
+        if (this.isDeparture()) {
+            return null;
+        }
+
+        const MAX_OFFSET_NM = 5;
+        const waypoints = this._routeModel.waypoints;
+        const offsetNm = _random(0, MAX_OFFSET_NM, true);
+
+        if (offsetNm < 0.5 || waypoints.length < 2) {
+            return null;
+        }
+
+        const heading = waypoints[0].calculateBearingToWaypoint(waypoints[1]);
+        const positionModel = waypoints[0].positionModel.generateDynamicPositionFromBearingAndDistance(
+            heading,
+            offsetNm
+        );
+
+        return { positionModel, heading };
     }
 
     /**
@@ -1040,7 +1081,11 @@ export default class SpawnPatternModel extends BaseModel {
         const weightedAirlineList = [];
 
         _forEach(this.airlines, (airline) => {
-            for (let i = 0; i < airline.rate; i++) {
+            // Perturb weight by random factor so airline mix varies per session
+            const perturbFactor = _random(0.3, 2.5, true);
+            const perturbedRate = Math.max(1, Math.round(airline.rate * perturbFactor));
+
+            for (let i = 0; i < perturbedRate; i++) {
                 weightedAirlineList.push(airline.name);
             }
         });

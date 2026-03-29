@@ -258,6 +258,27 @@ export const EVENT = {
 
     /**
      * @memberof EVENT
+     * @property TOGGLE_STAR_FIX_LABELS
+     * @type {string}
+     */
+    TOGGLE_STAR_FIX_LABELS: 'toggle-star-fix-labels',
+
+    /**
+     * @memberof EVENT
+     * @property TOGGLE_IAF_FIXES
+     * @type {string}
+     */
+    TOGGLE_IAF_FIXES: 'toggle-iaf-fixes',
+
+    /**
+     * @memberof EVENT
+     * @property TOGGLE_RUNWAY_CENTERLINE
+     * @type {string}
+     */
+    TOGGLE_RUNWAY_CENTERLINE: 'toggle-runway-centerline',
+
+    /**
+     * @memberof EVENT
      * @property TOGGLE_TERRAIN
      * @type {string}
      */
@@ -318,6 +339,19 @@ export const EVENT = {
      * @type {string}
      */
     ZOOM_VIEWPORT: 'zoom-viewport'
+};
+
+export const COOP_EVENT = {
+    ROOM_CREATED: 'coop-room-created',
+    ROOM_JOINED: 'coop-room-joined',
+    GUEST_JOINED: 'coop-guest-joined',
+    PARTNER_DISCONNECTED: 'coop-partner-disconnected',
+    REMOTE_COMMAND: 'coop-remote-command',
+    STATE_SYNC: 'coop-state-sync',
+    AIRCRAFT_SPAWN: 'coop-aircraft-spawn',
+    AIRCRAFT_REMOVE: 'coop-aircraft-remove',
+    COMMAND_RESULT: 'coop-command-result',
+    GAME_EVENT: 'coop-game-event'
 };
 
 export const AIRCRAFT_EVENT = {

@@ -13,6 +13,14 @@ import { distance2d } from '../math/distance';
 import { ENVIRONMENT } from '../constants/environmentConstants';
 import { avg } from '../math/core';
 
+// Descent gradient for pre-spawn altitude placement (feet per nautical mile).
+// ~3° descent path, consistent with FR24 observed profiles (176 EYVI arrivals).
+const PRESPAWN_DESCENT_GRADIENT_FT_PER_NM = 300;
+
+// No pre-spawn aircraft below FL150 — they haven't received ATC descent clearance.
+// Only applied when spawnAltitude >= this value (low-cruise patterns like EYKA are exempt).
+const PRESPAWN_ALTITUDE_FLOOR = 15000;
+
 /**
  * Return an array whose indices directly mirror those of `waypointModelList`, except it
  * contains the distances along the route at which each waypoint lies from the spawn point
@@ -79,6 +87,35 @@ export function _calculateAltitudeOffsets(waypointModelList, waypointOffsetMap) 
 }
 
 /**
+ * Like _calculateAltitudeOffsets, but only includes maximum (AT_OR_BELOW) restrictions.
+ * These are the only restrictions that force an aircraft to descend to a specific altitude.
+ * Minimum restrictions (A+) just mean "stay above X" and don't constrain descent planning.
+ *
+ * @function _calculateMaxAltitudeOffsets
+ * @param waypointModelList {array<WaypointModel>}
+ * @param waypointOffsetMap {array<number>}
+ * @return {array<array<number>>}
+ */
+function _calculateMaxAltitudeOffsets(waypointModelList, waypointOffsetMap) {
+    const offsets = [];
+
+    for (let i = 0; i < waypointModelList.length; i++) {
+        const waypointModel = waypointModelList[i];
+
+        if (!waypointModel.hasAltiudeMaximumRestriction) {
+            continue;
+        }
+
+        offsets.push([
+            waypointOffsetMap[i],
+            waypointModel.altitudeMaximum
+        ]);
+    }
+
+    return offsets;
+}
+
+/**
  * Calculate the interpolated altitude along the glidepath at the given distance along the route from the spawn point
  *
  * @function _calculateAltitudeAtOffset
@@ -141,29 +178,40 @@ export function _calculateIdealSpawnAltitudeAtOffset(
     totalDistance,
     airspaceCeiling
 ) {
-    const indexOfDistance = 0;
-    const indexOfAltitude = 1;
-    let firstAltitudeRestriction = altitudeOffsets[0];
-
-    if (!firstAltitudeRestriction) { // no altitude restrictions at all
-        firstAltitudeRestriction = [totalDistance, airspaceCeiling];
-    }
-
-    if (offsetDistance >= firstAltitudeRestriction[indexOfDistance]) {
-        return _calculateAltitudeAtOffset(altitudeOffsets, offsetDistance);
-    }
-
-    const distanceToFirstAltitudeRestriction = firstAltitudeRestriction[indexOfDistance] - offsetDistance;
-    const minutesToFirstAltitudeRestriction = distanceToFirstAltitudeRestriction / spawnSpeed * TIME.ONE_HOUR_IN_MINUTES;
-    const assumedDescentRate = 1000;
-    const highestAcceptableAltitude = firstAltitudeRestriction[indexOfAltitude] +
-        (assumedDescentRate * minutesToFirstAltitudeRestriction);
-
+    // Resolve spawn altitude from range if needed
     if (_isArray(spawnAltitude)) {
         spawnAltitude = _random(spawnAltitude[0] / 1000, spawnAltitude[1] / 1000) * 1000;
     }
 
-    return Math.min(_floor(highestAcceptableAltitude, -3), spawnAltitude);
+    // Find the first altitude restriction along the route
+    const indexOfDistance = 0;
+    const indexOfAltitude = 1;
+    let firstOffset;
+    let firstAlt;
+
+    if (altitudeOffsets.length > 0) {
+        firstOffset = altitudeOffsets[0][indexOfDistance];
+        firstAlt = altitudeOffsets[0][indexOfAltitude];
+    } else {
+        // No restrictions: use airspace ceiling at the boundary
+        firstOffset = totalDistance;
+        firstAlt = airspaceCeiling;
+    }
+
+    // Calculate TOD: where a 300 ft/nm descent from cruise meets the first restriction
+    const descentDist = (spawnAltitude - firstAlt) / PRESPAWN_DESCENT_GRADIENT_FT_PER_NM;
+    const todOffset = firstOffset - descentDist;
+
+    // Before TOD — aircraft is at cruise altitude
+    if (offsetDistance <= todOffset) {
+        return spawnAltitude;
+    }
+
+    // After TOD — descend at calibrated gradient
+    const altitude = spawnAltitude - ((offsetDistance - todOffset) * PRESPAWN_DESCENT_GRADIENT_FT_PER_NM);
+
+    // Never place pre-spawn aircraft below FL150 — they haven't been cleared
+    return _floor(Math.max(altitude, PRESPAWN_ALTITUDE_FLOOR), -3);
 }
 
 /**
@@ -188,7 +236,9 @@ function _calculateSpawnPositionsAndAltitudes(
 ) {
     const spawnPositionsAndAltitudes = [];
     const waypointOffsetMap = _calculateOffsetsToEachWaypointInRoute(waypointModelList);
-    const altitudeOffsets = _calculateAltitudeOffsets(waypointModelList, waypointOffsetMap);
+    // Use only maximum (AT_OR_BELOW) restrictions for pre-spawn descent profiles.
+    // Minimum restrictions (A+) mean "stay above X" — they don't force descent.
+    const altitudeOffsets = _calculateMaxAltitudeOffsets(waypointModelList, waypointOffsetMap);
 
     // for each new aircraft
     for (let i = 0; i < spawnOffsets.length; i++) {
@@ -367,8 +417,14 @@ const _preSpawn = (spawnPatternJson, airport) => {
     const routeModel = spawnPatternJson._routeModel ? spawnPatternJson._routeModel : new RouteModel(spawnPatternJson.route);
     const waypointModelList = routeModel.waypoints;
     const totalDistance = _calculateTotalDistanceAlongRoute(waypointModelList, airport);
-    // calculate number of offsets
-    const spawnOffsets = _assembleSpawnOffsets(entrailDistance, totalDistance);
+
+    // Limit pre-spawn range to near the entry fix so aircraft appear far from the airport.
+    // Offset 0 = entry fix (far), offset totalDistance = airspace boundary (close).
+    // Cap at 20nm from entry fix — aircraft spawn at cruise altitude near the boundary fixes.
+    const maxPreSpawnOffset = Math.min(totalDistance, 20);
+
+    // calculate number of offsets (capped to realistic range)
+    const spawnOffsets = _assembleSpawnOffsets(entrailDistance, maxPreSpawnOffset);
     // calculate heading, nextFix and position data to be used when creating an `AircraftModel` along a route
     const spawnPositions = _calculateSpawnPositionsAndAltitudes(
         waypointModelList,

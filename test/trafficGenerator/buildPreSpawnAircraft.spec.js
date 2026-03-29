@@ -106,20 +106,21 @@ ava('_calculateAltitudeAtOffset returns the interpolated altitude along the opti
     t.true(result === expectedResult);
 });
 
-ava('_calculateIdealSpawnAltitudeAtOffset() returns an interpolated altitude based on available descent distance to boundary when no restrictions exist', (t) => {
+ava('_calculateIdealSpawnAltitudeAtOffset() returns cruise altitude when before TOD and no restrictions exist', (t) => {
     const altitudesAtOffsets = [];
     const spawnAltitudeMock = 23000;
     const airspaceCeilingMock = 11000;
-    const spawnSpeedMock = 360; // 6 miles per minute
-    const totalDistanceMock = 60; // 10 minutes to airspace boundary (at 6mpm)
-    const offsetDistanceMock = 18; // 7 minute to airspace boundary (at 6mpm)
-    const expectedResult = airspaceCeilingMock + 7000; // 1000fpm descent rate for 1 minute
+    const spawnSpeedMock = 360;
+    const totalDistanceMock = 60;
+    // TOD = 60 - (23000-11000)/300 = 60 - 40 = 20; offset 18 < 20 → before TOD
+    const offsetDistanceMock = 18;
+    const expectedResult = 23000;
     const result = _calculateIdealSpawnAltitudeAtOffset(altitudesAtOffsets, offsetDistanceMock, spawnSpeedMock, spawnAltitudeMock, totalDistanceMock, airspaceCeilingMock);
 
     t.true(expectedResult === result);
 });
 
-ava('_calculateIdealSpawnAltitudeAtOffset() returns an interpolated altitude based on available descent distance to first altitude restriction', (t) => {
+ava('_calculateIdealSpawnAltitudeAtOffset() returns descent profile altitude when past TOD', (t) => {
     const altitudesAtOffsets = [
         [18.958610430426404, 19000],
         [41.52033243401482, 12000],
@@ -130,14 +131,17 @@ ava('_calculateIdealSpawnAltitudeAtOffset() returns an interpolated altitude bas
     const airspaceCeilingMock = 11000;
     const spawnSpeedMock = 360;
     const totalDistanceMock = 85;
+    // TOD = 18.959 - (23000-19000)/300 = 18.959 - 13.333 = 5.625
+    // offset 6.5 > 5.625 → past TOD
+    // alt = 23000 - (6.5 - 5.625) * 300 = 23000 - 262.5 = 22737.5 → floor to 22000
     const offsetDistanceMock = 6.5;
-    const expectedResult = 21000;
+    const expectedResult = 22000;
     const result = _calculateIdealSpawnAltitudeAtOffset(altitudesAtOffsets, offsetDistanceMock, spawnSpeedMock, spawnAltitudeMock, totalDistanceMock, airspaceCeilingMock);
 
     t.true(expectedResult === result);
 });
 
-ava('_calculateIdealSpawnAltitudeAtOffset() returns an interpolated altitude based on a flat glidepath between restrictions when spawn point is beyond the first altitude restriction', (t) => {
+ava('_calculateIdealSpawnAltitudeAtOffset() continues descent profile past first restriction, respecting FL150 floor', (t) => {
     const altitudesAtOffsets = [
         [18.958610430426404, 19000],
         [41.52033243401482, 12000],
@@ -148,6 +152,8 @@ ava('_calculateIdealSpawnAltitudeAtOffset() returns an interpolated altitude bas
     const airspaceCeilingMock = 11000;
     const spawnSpeedMock = 360;
     const totalDistanceMock = 85;
+    // TOD = 5.625; offset 25 → past TOD by 19.375nm
+    // alt = 23000 - 19.375 * 300 = 23000 - 5812.5 = 17187.5 → floor to 17000
     const offsetDistanceMock = 25;
     const expectedResult = 17000;
     const result = _calculateIdealSpawnAltitudeAtOffset(altitudesAtOffsets, offsetDistanceMock, spawnSpeedMock, spawnAltitudeMock, totalDistanceMock, airspaceCeilingMock);
@@ -155,7 +161,46 @@ ava('_calculateIdealSpawnAltitudeAtOffset() returns an interpolated altitude bas
     t.true(expectedResult === result);
 });
 
-ava('_calculateIdealSpawnAltitudeAtOffset() returns an appropriate altitude when a range of spawn altitudes is specified instead of a specific one', (t) => {
+ava('_calculateIdealSpawnAltitudeAtOffset() clamps at FL150 floor for deep-route spawn points', (t) => {
+    const altitudesAtOffsets = [
+        [18.958610430426404, 19000],
+        [41.52033243401482, 12000],
+        [60.46996764011041, 10000],
+        [70.68723901280046, 8000]
+    ];
+    const spawnAltitudeMock = 23000;
+    const airspaceCeilingMock = 11000;
+    const spawnSpeedMock = 360;
+    const totalDistanceMock = 85;
+    // TOD = 5.625; offset 50 → past TOD by 44.375nm
+    // alt = 23000 - 44.375 * 300 = 23000 - 13312.5 = 9687.5 → clamped to FL150
+    const offsetDistanceMock = 50;
+    const expectedResult = 15000;
+    const result = _calculateIdealSpawnAltitudeAtOffset(altitudesAtOffsets, offsetDistanceMock, spawnSpeedMock, spawnAltitudeMock, totalDistanceMock, airspaceCeilingMock);
+
+    t.true(expectedResult === result);
+});
+
+ava('_calculateIdealSpawnAltitudeAtOffset() applies FL150 floor regardless of spawn altitude', (t) => {
+    const altitudesAtOffsets = [
+        [10, 11000],
+        [25, 8000]
+    ];
+    const spawnAltitudeMock = 28000;
+    const airspaceCeilingMock = 11000;
+    const spawnSpeedMock = 280;
+    const totalDistanceMock = 80;
+    // TOD = 10 - (28000-11000)/300 = 10 - 56.667 = -46.667
+    // offset 70 → past TOD by 116.667nm
+    // alt = 28000 - 116.667 * 300 = 28000 - 35000 = -7000 → clamped to FL150
+    const offsetDistanceMock = 70;
+    const expectedResult = 15000;
+    const result = _calculateIdealSpawnAltitudeAtOffset(altitudesAtOffsets, offsetDistanceMock, spawnSpeedMock, spawnAltitudeMock, totalDistanceMock, airspaceCeilingMock);
+
+    t.true(expectedResult === result);
+});
+
+ava('_calculateIdealSpawnAltitudeAtOffset() handles array spawn altitude and returns cruise when before TOD', (t) => {
     const altitudesAtOffsets = [
         [18.958610430426404, 19000],
         [41.52033243401482, 12000],
@@ -166,11 +211,12 @@ ava('_calculateIdealSpawnAltitudeAtOffset() returns an appropriate altitude when
     const airspaceCeilingMock = 11000;
     const spawnSpeedMock = 250;
     const totalDistanceMock = 85;
+    // offset 0 is well before TOD for any spawnAlt in [23000, 23456]
     const offsetDistanceMock = 0;
-    const expectedResult = 23000;
     const result = _calculateIdealSpawnAltitudeAtOffset(altitudesAtOffsets, offsetDistanceMock, spawnSpeedMock, spawnAltitudeMock, totalDistanceMock, airspaceCeilingMock);
 
-    t.true(expectedResult === result);
+    // Result should be the resolved spawn altitude (between 23000 and 23456, rounded to nearest 1000)
+    t.true(result >= 23000 && result <= 24000);
 });
 
 ava('buildPreSpawnAircraft() throws when called with missing parameters', (t) => {

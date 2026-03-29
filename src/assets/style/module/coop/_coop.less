@@ -1,0 +1,138 @@
+#coop-lobby {
+    width: 400px;
+}
+
+.coop-section {
+    text-align: center;
+    margin: @spacing-2x 0;
+}
+
+.coop-divider {
+    margin: @spacing-3x 0;
+}
+
+.coop-or {
+    color: @gray-40;
+    font-style: italic;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+}
+
+.coop-btn {
+    display: inline-block;
+    padding: @spacing-1x @spacing-4x;
+    background-color: @blue-medium;
+    color: @light-gray;
+    font-family: inherit;
+    font-size: 14px;
+    border: 1px solid @blue-light;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background-color 0.2s ease;
+}
+
+.coop-btn:hover {
+    background-color: @blue-light;
+}
+
+.coop-btn-secondary {
+    background-color: transparent;
+    border-color: @gray-40;
+    margin-top: @spacing-2x;
+}
+
+.coop-btn-secondary:hover {
+    background-color: @dark-gray;
+}
+
+#coop-join-code {
+    display: block;
+    width: 120px;
+    margin: 0 auto @spacing-2x auto;
+    padding: @spacing-1x @spacing-2x;
+    background-color: @dark;
+    color: @light-gray;
+    font-family: inherit;
+    font-size: 20px;
+    text-align: center;
+    text-transform: uppercase;
+    letter-spacing: 4px;
+    border: 2px solid @blue-medium;
+    border-radius: 4px;
+}
+
+#coop-join-code:focus {
+    outline: none;
+    border-color: @blue-light;
+}
+
+.coop-status {
+    text-align: center;
+    margin: @spacing-3x 0 @spacing-2x 0;
+}
+
+.coop-code {
+    display: inline-block;
+    padding: @spacing-1x @spacing-3x;
+    margin-left: @spacing-2x;
+    background-color: @dark;
+    color: @green;
+    font-size: 24px;
+    letter-spacing: 6px;
+    border: 2px solid @blue-medium;
+    border-radius: 4px;
+}
+
+.coop-status-text {
+    text-align: center;
+    color: @gray-40;
+    font-style: italic;
+    margin: @spacing-2x 0;
+}
+
+.coop-connected {
+    color: @green;
+}
+
+.coop-error {
+    text-align: center;
+    color: @red;
+    margin: @spacing-2x 0;
+}
+
+.coop-icon {
+    display: inline-block;
+    color: @light-gray;
+    font-size: 10px;
+    font-weight: bold;
+    line-height: 36px;
+    padding: 0 4px;
+    letter-spacing: 1px;
+}
+
+.coop-icon.active {
+    color: @green;
+}
+
+#coop-indicator {
+    position: fixed;
+    top: @spacing-1x;
+    right: @spacing-1x;
+    padding: @spacing-1x @spacing-2x;
+    background-color: @dark-06;
+    color: @light-gray;
+    font-size: 11px;
+    border: 1px solid @blue-medium;
+    border-radius: 4px;
+    z-index: @airportInfo-z;
+    pointer-events: none;
+}
+
+#coop-indicator .coop-indicator-dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background-color: @green;
+    margin-right: @spacing-1x;
+}

@@ -8,7 +8,7 @@ import { vadd } from '../math/vector';
 import { leftPad } from '../utilities/generalUtilities';
 import { EVENT } from '../constants/eventNames';
 import { INVALID_NUMBER } from '../constants/globalConstants';
-import { DECIMAL_RADIX } from '../utilities/unitConverters';
+import { DECIMAL_RADIX, radiansToDegrees } from '../utilities/unitConverters';
 import {
     DATA_BLOCK_DIRECTION_LENGTH_SEPARATOR,
     DATA_BLOCK_POSITION_MAP
@@ -103,6 +103,27 @@ export default class RadarTargetModel {
          * @default INVALID_NUMBER
          */
         this._haloRadius = INVALID_NUMBER;
+
+        /**
+         * Pixel offset for the data block position, applied on top of the
+         * normal leader-based positioning. Set by drag interaction.
+         *
+         * @for RadarTargetModel
+         * @property _dataBlockPixelOffset
+         * @type {array}
+         * @default [0, 0]
+         */
+        this._dataBlockPixelOffset = [0, 0];
+
+        /**
+         * Last computed screen position of the data block center.
+         * Updated each frame during rendering, used for drag hit-testing.
+         *
+         * @for RadarTargetModel
+         * @property lastDataBlockScreenPosition
+         * @type {array|null}
+         */
+        this.lastDataBlockScreenPosition = null;
 
         /**
          * Boolean value representing whether the full data block is being suppressed
@@ -391,6 +412,22 @@ export default class RadarTargetModel {
     }
 
     /**
+     * Generate a string to be used for the third row of a datablock
+     * Shows heading and aircraft ICAO type
+     *
+     * @for RadarTargetModel
+     * @method buildDataBlockRowThree
+     * @returns {string}
+     */
+    buildDataBlockRowThree() {
+        const heading = round(radiansToDegrees(this.aircraftModel.heading)) % 360;
+        const displayHeading = heading === 0 ? 360 : heading;
+        const aircraftIcao = this.aircraftModel.model.icao.toUpperCase();
+
+        return `${leftPad(displayHeading, 3)} ${aircraftIcao}`;
+    }
+
+    /**
      * Abstracts the math from the `CanvasController` used to determine
      * where the center of a datablock should be located
      *
@@ -409,8 +446,9 @@ export default class RadarTargetModel {
             315: [-this._theme.DATA_BLOCK.HALF_WIDTH, -this._theme.DATA_BLOCK.HALF_HEIGHT]
         };
         const leaderEndToBlockCenter = blockCenterOffset[this.dataBlockLeaderDirection];
+        const basePosition = vadd(leaderIntersectionWithBlock, leaderEndToBlockCenter);
 
-        return vadd(leaderIntersectionWithBlock, leaderEndToBlockCenter);
+        return vadd(basePosition, this._dataBlockPixelOffset);
     }
 
     /**

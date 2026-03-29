@@ -10,6 +10,12 @@ canvas {
     height: ~"calc(100% - " @command-bar-height ~")";
     overflow: hidden;
     position: relative;
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+    user-select: none;
+    touch-action: none;
 }
 
 .paused #canvases {

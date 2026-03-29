@@ -63,6 +63,15 @@ export default class InputController {
         this.input.isMouseDown = false;
         this.commandBarContext = COMMAND_CONTEXT.AIRCRAFT;
 
+        this._coopController = null;
+
+        // Data block drag state
+        this._isDraggingDataBlock = false;
+        this._pendingDragTarget = null;
+        this._dragTargetRadarModel = null;
+        this._dragStartMousePos = [0, 0];
+        this._dragStartOffset = [0, 0];
+
         this._init();
     }
 
@@ -87,6 +96,8 @@ export default class InputController {
         this.onKeydownHandler = this._onKeydown.bind(this);
         this.onKeyupHandler = this._onKeyup.bind(this);
         this.onMouseScrollHandler = this._onMouseScroll.bind(this);
+        this.onWheelHandler = this._onWheel.bind(this);
+        this.onGestureChangeHandler = this._onGestureChange.bind(this);
         this.onMouseClickAndDragHandler = this._onMouseClickAndDrag.bind(this);
         this.onMouseUpHandler = this._onMouseUp.bind(this);
         this.onMouseDownHandler = this._onMouseDown.bind(this);
@@ -104,15 +115,17 @@ export default class InputController {
     enable() {
         this.$window.on('keydown', this.onKeydownHandler);
         this.$window.on('keyup', this.onKeyupHandler);
-        // TODO: these are non-standard events and will be deprecated soon. this should be moved
-        // over to the `wheel` event. This should also be moved over to `.on()` instead of `.bind()`
-        // https://developer.mozilla.org/en-US/docs/Web/Events/wheel
-        // this.$commandInput.on('DOMMouseScroll mousewheel', this.onMouseScrollHandler);
-        this.$canvases.bind('DOMMouseScroll mousewheel', this.onMouseScrollHandler);
+        // Modern wheel event for scroll zoom (works with trackpad two-finger scroll)
+        this.$canvases[0].addEventListener('wheel', this.onWheelHandler, { passive: false });
+        // Safari pinch-to-zoom gesture support
+        this.$canvases[0].addEventListener('gesturestart', (e) => e.preventDefault());
+        this.$canvases[0].addEventListener('gesturechange', this.onGestureChangeHandler);
         this.$canvases.on('mousemove', this.onMouseClickAndDragHandler);
         this.$canvases.on('mouseup', this.onMouseUpHandler);
         this.$canvases.on('mousedown', this.onMouseDownHandler);
         this.$canvases.on('dblclick', this.onMouseDblclickHandler);
+        // Prevent text selection and drag on canvas (fixes trackpad highlight issue on Safari/Mac)
+        this.$canvases.on('selectstart dragstart', (e) => e.preventDefault());
         this.$body.addEventListener('contextmenu', (event) => event.preventDefault());
 
         // TODO: Fix this
@@ -130,8 +143,8 @@ export default class InputController {
     disable() {
         this.$window.off('keydown', this.onKeydownHandler);
         this.$window.off('keyup', this.onKeyupHandler);
-        // uncomment only after `.on()` for this event has been implemented.
-        // this.$commandInput.off('DOMMouseScroll mousewheel', this.onMouseScrollHandler);
+        this.$canvases[0].removeEventListener('wheel', this.onWheelHandler);
+        this.$canvases[0].removeEventListener('gesturechange', this.onGestureChangeHandler);
         this.$canvases.off('mousemove', this.onMouseClickAndDragHandler);
         this.$canvases.off('mouseup', this.onMouseUpHandler);
         this.$canvases.off('mousedown', this.onMouseDownHandler);
@@ -164,6 +177,32 @@ export default class InputController {
         this.input.isMouseDown = false;
 
         return this;
+    }
+
+    setCoopController(coopController) {
+        this._coopController = coopController;
+    }
+
+    processRemoteCommand(rawCommand) {
+        const originalVal = this.$commandInput.val();
+
+        this.$commandInput.val(rawCommand);
+        this.commandBarContext = COMMAND_CONTEXT.AIRCRAFT;
+
+        try {
+            const response = this.processAircraftCommand();
+            this.deselectAircraft();
+
+            if (this._coopController) {
+                this._coopController.broadcastCommandResult(rawCommand, response);
+            }
+        } catch (error) {
+            if (this._coopController) {
+                this._coopController.broadcastCommandResult(rawCommand, 'Command not understood', true);
+            }
+        }
+
+        this.$commandInput.val(originalVal);
     }
 
     /**
@@ -276,10 +315,30 @@ export default class InputController {
 
         MeasureTool.reset();
 
+        // Restore default cursor
+        this.$canvases.css('cursor', 'default');
+
         // Mark for shallow render so the feedback is immediate
         if (hasPaths) {
             this._eventBus.trigger(EVENT.MARK_SHALLOW_RENDER);
         }
+    }
+
+    /**
+     * Toggles the measuring tool on/off
+     *
+     * @for InputController
+     * @method _toggleMeasuring
+     * @private
+     */
+    _toggleMeasuring() {
+        if (MeasureTool.isMeasuring) {
+            this._stopMeasuring();
+        } else {
+            this._startMeasuring();
+        }
+
+        this._eventBus.trigger(EVENT.MARK_SHALLOW_RENDER);
     }
 
     /**
@@ -295,6 +354,9 @@ export default class InputController {
         }
 
         MeasureTool.startNewPath();
+
+        // Visual feedback: change cursor to crosshair while measuring
+        this.$canvases.css('cursor', 'crosshair');
     }
 
     /**
@@ -306,12 +368,64 @@ export default class InputController {
      */
     _stopMeasuring() {
         MeasureTool.endPath();
+
+        // Restore default cursor
+        this.$canvases.css('cursor', 'default');
+    }
+
+    /**
+     * Modern wheel event handler — supports trackpad two-finger scroll
+     * and mouse wheel zoom. Uses deltaY for direction.
+     *
+     * @for InputController
+     * @method _onWheel
+     * @param event {WheelEvent}
+     */
+    _onWheel(event) {
+        event.preventDefault();
+
+        // ctrlKey is set for trackpad pinch gestures in Chrome/Firefox
+        if (event.ctrlKey) {
+            if (event.deltaY < 0) {
+                CanvasStageModel.zoomIn();
+            } else if (event.deltaY > 0) {
+                CanvasStageModel.zoomOut();
+            }
+
+            return;
+        }
+
+        // Regular scroll (two-finger swipe or mouse wheel)
+        if (event.deltaY < 0) {
+            CanvasStageModel.zoomIn();
+        } else if (event.deltaY > 0) {
+            CanvasStageModel.zoomOut();
+        }
+    }
+
+    /**
+     * Safari gesture event handler for pinch-to-zoom on trackpad.
+     * Safari fires gesturechange with event.scale (>1 = zoom in, <1 = zoom out).
+     *
+     * @for InputController
+     * @method _onGestureChange
+     * @param event {GestureEvent}
+     */
+    _onGestureChange(event) {
+        event.preventDefault();
+
+        if (event.scale > 1) {
+            CanvasStageModel.zoomIn();
+        } else if (event.scale < 1) {
+            CanvasStageModel.zoomOut();
+        }
     }
 
     /**
      * @for InputController
      * @method _onMouseScroll
      * @param event {jquery Event}
+     * @deprecated — kept for fallback, use _onWheel instead
      */
     _onMouseScroll(event) {
         if (event.originalEvent.wheelDelta > 0 || event.originalEvent.detail < 0) {
@@ -339,6 +453,34 @@ export default class InputController {
             return this;
         }
 
+        // Handle data block drag — only start after 5px movement threshold
+        if (this._pendingDragTarget && !this._isDraggingDataBlock) {
+            const dx = event.pageX - this._dragStartMousePos[0];
+            const dy = event.pageY - this._dragStartMousePos[1];
+
+            if (Math.abs(dx) > 5 || Math.abs(dy) > 5) {
+                this._isDraggingDataBlock = true;
+                this._dragTargetRadarModel = this._pendingDragTarget;
+            }
+        }
+
+        if (this._isDraggingDataBlock && this._dragTargetRadarModel) {
+            const dx = event.pageX - this._dragStartMousePos[0];
+            const dy = event.pageY - this._dragStartMousePos[1];
+
+            this._dragTargetRadarModel._dataBlockPixelOffset = [
+                this._dragStartOffset[0] + dx,
+                this._dragStartOffset[1] + dy
+            ];
+
+            return this;
+        }
+
+        // Don't pan if we have a pending drag target (clicked on data block)
+        if (this._pendingDragTarget) {
+            return this;
+        }
+
         const nextXPan = event.pageX - this._mouseDownScreenPosition[0];
         const nextYPan = event.pageY - this._mouseDownScreenPosition[1];
 
@@ -352,6 +494,14 @@ export default class InputController {
      */
     _onMouseUp(event) {
         this.input.isMouseDown = false;
+
+        // Clear data block drag state
+        this._pendingDragTarget = null;
+
+        if (this._isDraggingDataBlock) {
+            this._isDraggingDataBlock = false;
+            this._dragTargetRadarModel = null;
+        }
     }
 
     /**
@@ -471,9 +621,12 @@ export default class InputController {
 
         // TODO: this switch can be simplified, there is a lot of repetition here
         switch (code) {
-            case KEY_CODES.CONTROL_LEFT:
-            case KEY_CODES.CONTROL_RIGHT:
-                this._startMeasuring();
+            case KEY_CODES.KEY_M:
+                // Toggle measure mode only when command input is empty
+                if (currentCommandInputValue.length === 0) {
+                    event.preventDefault();
+                    this._toggleMeasuring();
+                }
 
                 break;
             case KEY_CODES.ENTER:
@@ -606,9 +759,23 @@ export default class InputController {
                 }
 
                 break;
+            case KEY_CODES.KEY_Z:
+            case KEY_CODES.BACKSPACE:
+                if (MeasureTool.isMeasuring && currentCommandInputValue.length === 0) {
+                    event.preventDefault();
+                    this._removePreviousMeasurePoint();
+                }
+
+                break;
             case KEY_CODES.ESCAPE:
             case LEGACY_KEY_CODES.ESCAPE:
-                // TODO: Probably should have its own cancel button
+                if (MeasureTool.isMeasuring) {
+                    this._stopMeasuring();
+                    this._eventBus.trigger(EVENT.MARK_SHALLOW_RENDER);
+
+                    break;
+                }
+
                 this._resetMeasuring();
 
                 UiController.closeAllDialogs();
@@ -647,13 +814,9 @@ export default class InputController {
         }
 
         switch (code) {
-            case KEY_CODES.CONTROL_LEFT:
-            case KEY_CODES.CONTROL_RIGHT:
-                this._stopMeasuring();
-                this._eventBus.trigger(EVENT.MARK_SHALLOW_RENDER);
-
-                break;
             default:
+                // CTRL keyup no longer stops measuring (toggle mode uses M key instead)
+                break;
         }
     }
 
@@ -810,6 +973,17 @@ export default class InputController {
      * @return {array} [success of operation, response]
      */
     processCommand() {
+        // In coop guest mode, relay aircraft commands to host instead of executing locally
+        if (this._coopController && this._coopController.isGuest &&
+            this.commandBarContext === COMMAND_CONTEXT.AIRCRAFT) {
+            const rawCommand = this.$commandInput.val().trim().toLowerCase();
+
+            this._coopController.sendCommand(rawCommand);
+            this.deselectAircraft();
+
+            return;
+        }
+
         let response = [];
 
         if (this.commandBarContext === COMMAND_CONTEXT.AIRCRAFT) {
@@ -1086,9 +1260,30 @@ export default class InputController {
         }
 
         const mouseCanvasPos = CanvasStageModel.calculateCanvasPositionFromPagePosition(event.pageX, event.pageY);
+
+        // Check if click is on a data block (for drag — only starts after movement)
+        const hitRadarTarget = this._findDataBlockAtCanvasPosition(mouseCanvasPos);
+
+        if (hitRadarTarget) {
+            this._pendingDragTarget = hitRadarTarget;
+            this._dragStartMousePos = [event.pageX, event.pageY];
+            this._dragStartOffset = [...hitRadarTarget._dataBlockPixelOffset];
+            this._mouseDownScreenPosition = [event.pageX, event.pageY];
+            this.input.isMouseDown = true;
+
+            // Also select the aircraft when clicking its data block
+            const acModel = hitRadarTarget.aircraftModel;
+
+            if (acModel) {
+                this.selectAircraft(acModel);
+            }
+
+            return;
+        }
+
         const [aircraftModel, distanceFromPosition] = this._findClosestAircraftAndDistanceToCanvasPosition(...mouseCanvasPos);
 
-        if (distanceFromPosition > CanvasStageModel.translatePixelsToKilometers(50)) {
+        if (distanceFromPosition > CanvasStageModel.translatePixelsToKilometers(80)) {
             this.deselectAircraft();
             this._markMousePressed(event, MOUSE_BUTTON_NAMES.LEFT);
         } else if (this.commandBarContext === COMMAND_CONTEXT.SCOPE) {
@@ -1097,6 +1292,52 @@ export default class InputController {
         } else if (aircraftModel) {
             this.selectAircraft(aircraftModel);
         }
+    }
+
+    /**
+     * Find a data block at the given canvas position for drag hit-testing.
+     * Returns the RadarTargetModel if a data block is hit, or null.
+     *
+     * @for InputController
+     * @method _findDataBlockAtCanvasPosition
+     * @param canvasPos {array} [x, y] canvas position
+     * @returns {RadarTargetModel|null}
+     * @private
+     */
+    _findDataBlockAtCanvasPosition(canvasPos) {
+        const radarTargetModels = this._scopeModel.radarTargetCollection.items;
+        const [mouseX, mouseY] = canvasPos;
+        // Note: canvasPos Y-axis is positive-up (from calculateCanvasPositionFromPagePosition)
+        // but lastDataBlockScreenPosition Y-axis is positive-down (canvas render context)
+        // We negate mouseY to match the render coordinate system
+        const renderMouseY = -mouseY;
+        const MAX_HIT_DISTANCE = 70; // px — generous for trackpad use
+        let closestTarget = null;
+        let closestDist = Infinity;
+
+        for (let i = 0; i < radarTargetModels.length; i++) {
+            const radarTarget = radarTargetModels[i];
+
+            if (!radarTarget.lastDataBlockScreenPosition) {
+                continue;
+            }
+
+            if (!radarTarget.aircraftModel.isVisible() || radarTarget.aircraftModel.hit) {
+                continue;
+            }
+
+            const [blockX, blockY] = radarTarget.lastDataBlockScreenPosition;
+            const dx = mouseX - blockX;
+            const dy = renderMouseY - blockY;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+
+            if (dist < MAX_HIT_DISTANCE && dist < closestDist) {
+                closestDist = dist;
+                closestTarget = radarTarget;
+            }
+        }
+
+        return closestTarget;
     }
 
     /**

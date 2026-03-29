@@ -769,7 +769,6 @@ export default class AircraftModel {
      */
     getClimbRate() {
         let serviceCeilingClimbRate;
-        let cr_uncorr;
         let cr_current;
         const { altitude } = this;
         const rate = this.model.rate.climb;
@@ -781,19 +780,23 @@ export default class AircraftModel {
             serviceCeilingClimbRate = 100;
         }
 
-        // TODO: enumerate the magic number
-        // in troposphere
-        if (this.altitude < 36152) {
-            // TODO: break this assignemnt up into smaller parts and holy magic numbers! enumerate the magic numbers
-            cr_uncorr = rate * 420.7 * ((1.232 * (((518.6 - 0.00356 * altitude) / 518.6) ** 5.256)) /
+        if (this.model.engines.type === ENGINE_TYPE.JET) {
+            // Power-law model for jet engines. Jets maintain thrust much better
+            // at altitude than the ISA atmospheric density formula assumed.
+            // Exponent 1.6 validated against 399 FR24 departure tracks at EYVI.
+            const ceilingRatio = (altitude / ceiling) ** 1.6;
+
+            cr_current = rate * (1 - ceilingRatio) + serviceCeilingClimbRate * ceilingRatio;
+        } else if (this.altitude < 36152) {
+            // Original atmospheric density formula for piston/turboprop engines
+            // Reference: https://www.grc.nasa.gov/www/k-12/rocket/atmos.html
+            const cr_uncorr = rate * 420.7 * ((1.232 * (((518.6 - 0.00356 * altitude) / 518.6) ** 5.256)) /
                 (518.6 - 0.00356 * altitude));
+
             cr_current = cr_uncorr - (altitude / ceiling * cr_uncorr) + (altitude / ceiling * serviceCeilingClimbRate);
         } else {
-            // in lower stratosphere
-            // re-do for lower stratosphere
-            // Reference: https://www.grc.nasa.gov/www/k-12/rocket/atmos.html
-            // also recommend using graphing calc from desmos.com
-            return this.model.rate.climb; // <-- NOT VALID! Just a placeholder!
+            // Lower stratosphere — fallback to base rate for piston engines
+            cr_current = rate;
         }
 
         return cr_current;
@@ -2037,96 +2040,139 @@ export default class AircraftModel {
      * @return {number}
      */
     _calculateTargetedAltitudeVnav() {
-        const altitudeMaximumWaypoint = this.fms.findNextWaypointWithMaximumAltitudeRestriction();
+        const restrictedWaypoints = this.fms.getAllRestrictedWaypointsWithDistances(this.positionModel);
+        const descentRateFPM = this.model.rate.descent * PERFORMANCE.TYPICAL_DESCENT_FACTOR;
+
+        // Check if we are below any upcoming minimum altitude restriction — if so, climb
         const altitudeMinimumWaypoint = this.fms.findNextWaypointWithMinimumAltitudeRestriction();
-        const maximumAltitudeExists = !_isNil(altitudeMaximumWaypoint);
-        const minimumAltitudeExists = !_isNil(altitudeMinimumWaypoint);
+
+        if (!_isNil(altitudeMinimumWaypoint) && this.altitude < altitudeMinimumWaypoint.altitudeMinimum) {
+            return this._calculateTargetedAltitudeVnavClimb(altitudeMinimumWaypoint);
+        }
+
+        if (this.mcp.altitude >= this.altitude) {
+            // Climbing: target MCP altitude, but respect max (AT_OR_BELOW) restrictions
+            // that are between current altitude and MCP
+            const altitudeMaximumWaypoint = this.fms.findNextWaypointWithMaximumAltitudeRestriction();
+
+            if (_isNil(altitudeMaximumWaypoint) || this.mcp.altitude < altitudeMaximumWaypoint.altitudeMaximum) {
+                return this.mcp.altitude;
+            }
+
+            // Max restriction is below MCP — don't descend below MCP to meet it.
+            // The controller must explicitly lower MCP before the aircraft will
+            // descend to satisfy low max restrictions (e.g., STAR A110- at FL110
+            // should not pull aircraft below the FL150 autonomous floor).
+            return Math.max(altitudeMaximumWaypoint.altitudeMaximum, this.mcp.altitude);
+        }
+
+        // Descending: backward-sweep over ALL altitude restrictions
+        // For arrivals, minimum restrictions (A+) are descent planning targets — plan to
+        // arrive at each waypoint AT its minimum altitude on a smooth continuous descent.
+        // For maximum restrictions (A-), must be at or below at the waypoint.
+        //
+        // Key: instead of returning the waypoint's target altitude (causing a max-rate plunge),
+        // return the INTERPOLATED altitude on a smooth descent path from current position to
+        // the waypoint. Each tick recalculates, creating continuous descent.
+
+        // Standard 3-degree descent gradient: ~300 ft/nm.
+        // Using a fixed gradient (instead of computing from max descent rate)
+        // produces more realistic TOD placement — aircraft hold altitude longer
+        // and descend more gradually, matching real-world profiles.
+        const feetPerNm = 300;
+
+        let lowestProfileAlt = null; // lowest ideal altitude from any restriction
+
+        for (let i = 0; i < restrictedWaypoints.length; i++) {
+            const { waypoint, cumulativeDistanceNm } = restrictedWaypoints[i];
+
+            let targetAlt = null;
+
+            if (waypoint.hasAltiudeMaximumRestriction) {
+                // Maximum restriction: compute floor from prior minimum restrictions
+                let minimumFloor = 0;
+
+                for (let j = 0; j < i; j++) {
+                    const priorWp = restrictedWaypoints[j].waypoint;
+
+                    if (priorWp.hasAltiudeMinimumRestriction) {
+                        minimumFloor = Math.max(minimumFloor, priorWp.altitudeMinimum);
+                    }
+                }
+
+                targetAlt = Math.max(waypoint.altitudeMaximum, minimumFloor);
+            } else if (this.isArrival() && waypoint.hasAltiudeMinimumRestriction) {
+                // Minimum restriction: for arrivals, plan to arrive at this altitude
+                targetAlt = waypoint.altitudeMinimum;
+            }
+
+            if (targetAlt === null || this.altitude <= targetAlt) {
+                continue;
+            }
+
+            // Compute the ideal altitude at our current position on a smooth descent
+            // path to targetAlt at the waypoint. This is the altitude on a linear descent
+            // profile: at the waypoint = targetAlt, going back = +feetPerNm per nm.
+            const idealAltAtCurrentPos = targetAlt + (cumulativeDistanceNm * feetPerNm);
+
+            if (this.altitude > idealAltAtCurrentPos) {
+                // We are above the descent profile (past TOD) — need to descend.
+                // The profile altitude tells us where we SHOULD be right now.
+                // Cap at targetAlt minimum (don't overshoot below the waypoint target).
+                const profileAlt = Math.max(idealAltAtCurrentPos, targetAlt);
+
+                if (lowestProfileAlt === null || profileAlt < lowestProfileAlt) {
+                    lowestProfileAlt = profileAlt;
+                }
+            }
+        }
+
+        if (lowestProfileAlt !== null) {
+            // Descend toward the profile altitude, but respect floors
+            let effectiveTarget = Math.max(lowestProfileAlt, this.mcp.altitude);
+
+            // Don't descend below the nearest upcoming minimum altitude restriction
+            if (!_isNil(altitudeMinimumWaypoint)) {
+                effectiveTarget = Math.max(effectiveTarget, altitudeMinimumWaypoint.altitudeMinimum);
+            }
+
+            return effectiveTarget;
+        }
+
+        // No descent profile triggered — we're above all restrictions but before TOD.
+        // Check if there are any descent-relevant restrictions ahead at all.
+        const hasRestrictionAhead = restrictedWaypoints.some(({ waypoint }) => {
+            if (waypoint.hasAltiudeMaximumRestriction && waypoint.altitudeMaximum < this.altitude) {
+                return true;
+            }
+
+            if (this.isArrival() && waypoint.hasAltiudeMinimumRestriction && waypoint.altitudeMinimum < this.altitude) {
+                return true;
+            }
+
+            return false;
+        });
 
         if (this.mcp.altitude < this.altitude) {
-            // we want to descend...
-            if (!minimumAltitudeExists || altitudeMinimumWaypoint.altitudeMinimum < this.mcp.altitude) {
-                // ... and there is nothing that can stop us.
-                return this.mcp.altitude;
+            if (hasRestrictionAhead) {
+                // Restrictions ahead but before TOD — maintain current altitude
+                return this.altitude;
             }
 
-            const { altitudeMinimum } = altitudeMinimumWaypoint;
+            // No restrictions ahead — descend freely toward MCP altitude,
+            // respecting any upcoming minimum altitude floors.
+            let descentFloor = this.mcp.altitude;
 
-            if (this.altitude < altitudeMinimum) {
-                // ... but we are too low and we have to comply with VNAV restriction
-                return this._calculateTargetedAltitudeVnavClimb(altitudeMinimumWaypoint);
+            if (!_isNil(altitudeMinimumWaypoint) && altitudeMinimumWaypoint.altitudeMinimum > this.mcp.altitude) {
+                descentFloor = altitudeMinimumWaypoint.altitudeMinimum;
             }
 
-            if (maximumAltitudeExists) {
-                const { altitudeMaximum } = altitudeMaximumWaypoint;
-
-                if (this.mcp.altitude > altitudeMaximum) {
-                    // we are too high but we are prioritizing clearance over VNAV restriction
-                    return this.mcp.altitude;
-                }
-
-                if (this.altitude > altitudeMaximum) {
-                    // we are too high...
-                    if (altitudeMinimum > altitudeMaximum) {
-                        // the minimum altitude is above the maximum altiude, check if we can descend all the way down
-                        // without violating VNAV restrictions.
-                        const firstWaypoint = this._findFirstWaypoint(
-                            this.fms.waypoints,
-                            altitudeMinimumWaypoint,
-                            altitudeMaximumWaypoint
-                        );
-
-                        if (firstWaypoint.name === altitudeMinimumWaypoint.name) {
-                            // ... but we can not descend all the way down yet
-                            return this._calculateTargetedAltitudeVnavDescent(altitudeMinimumWaypoint, altitudeMinimum);
-                        }
-                    }
-                    // ...so descend to comply with VNAV restriction
-                    return this._calculateTargetedAltitudeVnavDescent(altitudeMaximumWaypoint, altitudeMaximum);
-                }
-            }
-        } else {
-            // we want to climb...
-            if (!maximumAltitudeExists || this.mcp.altitude < altitudeMaximumWaypoint.altitudeMaximum) {
-                // ... and there is nothing that can stop us.
-                return this.mcp.altitude;
-            }
-
-            const { altitudeMaximum } = altitudeMaximumWaypoint;
-
-            if (this.altitude > altitudeMaximum) {
-                // .. but we are too high and have to comply with NAV restriction
-                return this._calculateTargetedAltitudeVnavDescent(altitudeMaximumWaypoint, altitudeMaximum);
-            }
-
-            if (minimumAltitudeExists) {
-                const { altitudeMinimum } = altitudeMinimumWaypoint;
-
-                if (this.mcp.altitude < altitudeMinimum) {
-                    // we are too low but we are prioritizing clearance over VNAV restriction
-                    return this.mcp.altitude;
-                }
-
-                if (this.altitude < altitudeMinimum) {
-                    // we are too low ...
-                    if (altitudeMaximum < altitudeMinimum) {
-                        // the maximum altitude is below the minimal altiude, check if we can climb all the way up
-                        // without violating VNAV restrictions.
-                        const firstWaypoint = this._findFirstWaypoint(
-                            this.fms.waypoints, altitudeMinimumWaypoint, altitudeMaximumWaypoint
-                        );
-
-                        if (firstWaypoint.name === altitudeMaximumWaypoint.name) {
-                            // ... but we can not climb all the way up yet
-                            return altitudeMaximum;
-                        }
-                    }
-                    // ... climb to comply with VNAV restriction
-                    return this._calculateTargetedAltitudeVnavClimb(altitudeMinimumWaypoint);
-                }
-            }
-
-            return altitudeMaximum;
+            return descentFloor;
         }
+
+        // Safety: if no other branch returned, maintain MCP altitude.
+        // Prevents _defaultTo() from preserving a stale (lower) target altitude.
+        return this.mcp.altitude;
     }
 
     /**
@@ -2240,34 +2286,58 @@ export default class AircraftModel {
      * @return {number} speed, in knots
      */
     _calculateTargetedSpeedVnav() {
-        const nextSpeedMaximumWaypoint = this.fms.findNextWaypointWithMaximumSpeedAtOrBelow(this.speed);
-        const nextSpeedMinimumWaypoint = this.fms.findNextWaypointWithMinimumSpeedAtOrAbove(this.speed);
-        const hasMaximumSpeed = !_isNil(nextSpeedMaximumWaypoint);
-        const hasMinimumSpeed = !_isNil(nextSpeedMinimumWaypoint);
+        // Layer A: scan ALL upcoming waypoint speed restrictions (backward-sweep)
+        let waypointSpeedTarget = this.mcp.speed;
+        const restrictedWaypoints = this.fms.getAllRestrictedWaypointsWithDistances(this.positionModel);
+        const decelerationRate = this.model.rate.decelerate / 2; // knots per second
 
-        if (!hasMaximumSpeed && !hasMinimumSpeed) {
-            return this.mcp.speed;
-        }
+        for (let i = 0; i < restrictedWaypoints.length; i++) {
+            const { waypoint, cumulativeDistanceNm } = restrictedWaypoints[i];
 
-        if (hasMaximumSpeed && hasMinimumSpeed) {
-            const { waypoints } = this.fms;
-            const indexOfMax = _findIndex(waypoints, (waypoint) => waypoint.name === nextSpeedMaximumWaypoint.name);
-            const indexOfMin = _findIndex(waypoints, (waypoint) => waypoint.name === nextSpeedMinimumWaypoint.name);
-
-            if (indexOfMax < indexOfMin) {
-                return this._calculateTargetedSpeedVnavDeceleration(nextSpeedMaximumWaypoint);
+            if (!waypoint.hasSpeedRestriction) {
+                continue;
             }
 
-            return this._calculateTargetedSpeedVnavAcceleration(nextSpeedMinimumWaypoint);
+            // Check maximum speed restrictions (need to slow down)
+            if (waypoint.hasSpeedMaximumRestriction && this.speed > waypoint.speedMaximum) {
+                const speedChange = this.speed - waypoint.speedMaximum;
+                const decelTimeSeconds = speedChange / decelerationRate;
+                const timeToWaypointSeconds = cumulativeDistanceNm / this.groundSpeed * TIME.ONE_HOUR_IN_SECONDS;
+
+                if (decelTimeSeconds >= timeToWaypointSeconds) {
+                    waypointSpeedTarget = Math.min(waypointSpeedTarget, waypoint.speedMaximum);
+                }
+            }
+
+            // Check minimum speed restrictions (need to speed up)
+            if (waypoint.hasSpeedMinimumRestriction && this.speed < waypoint.speedMinimum) {
+                waypointSpeedTarget = Math.min(waypoint.speedMinimum, this.mcp.speed);
+            }
         }
 
-        if (hasMaximumSpeed) {
-            return this._calculateTargetedSpeedVnavDeceleration(nextSpeedMaximumWaypoint);
+        // Layer B: altitude-based speed gates (always apply for arrivals)
+        let altitudeSpeedTarget = this.mcp.speed;
+
+        if (this.isArrival()) {
+            const distanceToAirportNm = nm(this.distance);
+
+            if (this.altitude < 6000) {
+                altitudeSpeedTarget = Math.min(altitudeSpeedTarget, PERFORMANCE.APPROACH_SPEED_BELOW_6000);
+            }
+
+            if (this.altitude < 4000 && distanceToAirportNm < PERFORMANCE.APPROACH_DISTANCE_THRESHOLD_NM) {
+                altitudeSpeedTarget = Math.min(altitudeSpeedTarget, PERFORMANCE.APPROACH_SPEED_BELOW_4000);
+            }
+
+            // Vapp: landing speed + addend, when established on approach or very close
+            if (this.isEstablishedOnCourse() || distanceToAirportNm < 8) {
+                const vApp = this.model.speed.landing + PERFORMANCE.APPROACH_SPEED_ADDEND;
+                altitudeSpeedTarget = Math.min(altitudeSpeedTarget, vApp);
+            }
         }
 
-        if (hasMinimumSpeed) {
-            return this._calculateTargetedSpeedVnavAcceleration(nextSpeedMinimumWaypoint);
-        }
+        // Final target = minimum of waypoint restriction, altitude gate, and MCP speed
+        return Math.min(waypointSpeedTarget, altitudeSpeedTarget, this.mcp.speed);
     }
 
     /**
@@ -2421,10 +2491,81 @@ export default class AircraftModel {
     */
     decreaseAircraftAltitude() {
         const altitude_diff = this.altitude - this.target.altitude;
-        let descentRate = this.model.rate.descent * PERFORMANCE.TYPICAL_DESCENT_FACTOR;
+        const maxRate = this.model.rate.descent;
+        const minRate = maxRate * 0.25;       // ~750-800 fpm for jets
+        const gentleRate = maxRate * 0.5;     // ~1500 fpm for jets
+        let descentRate;
 
         if (this.mcp.shouldExpediteAltitudeChange || this.isEstablishedOnCourse()) {
-            descentRate = this.model.rate.descent;
+            descentRate = maxRate;
+        } else {
+            // Find next restriction below us to compute required descent rate
+            let requiredRate = gentleRate; // default if no restriction found
+            const nmPerMinute = this.groundSpeed / TIME.ONE_HOUR_IN_MINUTES;
+
+            try {
+                const restrictedWaypoints = this.fms.getAllRestrictedWaypointsWithDistances(this.positionModel);
+
+                for (let i = 0; i < restrictedWaypoints.length; i++) {
+                    const { waypoint, cumulativeDistanceNm } = restrictedWaypoints[i];
+                    let restrictionAlt = null;
+
+                    if (waypoint.hasAltiudeMaximumRestriction && waypoint.altitudeMaximum < this.altitude) {
+                        restrictionAlt = waypoint.altitudeMaximum;
+                    } else if (this.isArrival() && waypoint.hasAltiudeMinimumRestriction && waypoint.altitudeMinimum < this.altitude) {
+                        restrictionAlt = waypoint.altitudeMinimum;
+                    }
+
+                    if (restrictionAlt !== null && cumulativeDistanceNm > 0.5) {
+                        const altToLose = this.altitude - restrictionAlt;
+                        const minutesToWaypoint = cumulativeDistanceNm / nmPerMinute;
+                        const rateNeeded = altToLose / minutesToWaypoint;
+                        requiredRate = Math.max(requiredRate, rateNeeded);
+                        break; // use nearest restriction
+                    }
+                }
+            } catch (e) {
+                // FMS may not be ready; fall back to altitude-based logic
+            }
+
+            // Altitude-dependent default descent rate below 10,000ft AGL.
+            // Real aircraft descend more gently on approach. Validated against
+            // 180 FR24 arrival tracks at EYVI.
+            // IMPORTANT: this only sets the default rate when no restriction demands
+            // more. If a restriction requires a higher rate (e.g., after a direct),
+            // the restriction-driven rate takes priority.
+            const airportElevation = AirportController.airport_get().elevation;
+            const altitudeAgl = this.altitude - airportElevation;
+            const approachRate = minRate * 0.75; // ~656 fpm — matches FR24 below 2000ft AGL
+            let defaultRate = gentleRate;
+
+            if (altitudeAgl < 2000) {
+                defaultRate = approachRate;
+            } else if (altitudeAgl < 5000) {
+                const blend = (altitudeAgl - 2000) / 3000;
+                defaultRate = approachRate + blend * (gentleRate * 0.6 - approachRate);
+            } else if (altitudeAgl < 10000) {
+                defaultRate = gentleRate * 0.75;
+            }
+
+            // Use the altitude-based default rate unless a restriction demands more.
+            // This ensures directs/shortcuts that shorten the route still meet
+            // altitude restrictions even when below 10,000ft AGL.
+            const effectiveRate = Math.max(defaultRate, requiredRate);
+
+            // Blend with altitude-based smoothing near level-off,
+            // BUT only if no restriction demands a rate above gentleRate.
+            // After a "direct" shortcut the route is shorter and the
+            // restriction-required rate can be high; smoothing must not
+            // override that requirement.
+            if (altitude_diff < 1000 && requiredRate <= gentleRate) {
+                // Nearly at target — gentle regardless of distance
+                const factor = altitude_diff / 1000;
+                descentRate = minRate + factor * (Math.min(effectiveRate, gentleRate) - minRate);
+            } else {
+                // Clamp between minimum and aircraft max
+                descentRate = Math.max(minRate, Math.min(effectiveRate, maxRate));
+            }
         }
 
         const feetPerSecond = descentRate * TIME.ONE_SECOND_IN_MINUTES;
@@ -2765,11 +2906,47 @@ export default class AircraftModel {
 
         const isInsideAirspace = this.isInsideAirspace(AirportController.airport_get());
 
-        if (this.isControllable === isInsideAirspace) {
+        // For arrivals not yet in airspace, check if they'll enter within ~3 minutes
+        // Project position forward and test if that projected point is inside airspace
+        let shouldBeControllable = isInsideAirspace;
+
+        if (!isInsideAirspace && this.isArrival()) {
+            if (this.isControllable) {
+                // Already contacted — keep controllable while approaching airspace
+                // to prevent flip-flopping between controllable/not-controllable
+                shouldBeControllable = true;
+            } else {
+                // Not yet contacted — check if they'll enter within ~3 minutes
+                const EARLY_CONTACT_MINUTES = 3;
+                const nmPerMinute = this.groundSpeed / TIME.ONE_HOUR_IN_MINUTES;
+                const lookAheadNm = nmPerMinute * EARLY_CONTACT_MINUTES;
+                const KM_PER_NM = 1.852;
+                const lookAheadKm = lookAheadNm * KM_PER_NM;
+                const projectedX = this.relativePosition[0] + lookAheadKm * Math.sin(this.heading);
+                const projectedY = this.relativePosition[1] + lookAheadKm * Math.cos(this.heading);
+                const airport = AirportController.airport_get();
+
+                if (airport.isPointWithinAirspace([projectedX, projectedY], this.altitude)) {
+                    shouldBeControllable = true;
+                }
+            }
+        }
+
+        if (this.isControllable === shouldBeControllable) {
             return;
         }
 
-        this.isControllable = isInsideAirspace;
+        // Only allow transitions: not-controllable → controllable (early contact or entering)
+        // and controllable → not-controllable (exiting airspace)
+        if (!shouldBeControllable && !isInsideAirspace) {
+            // Aircraft is leaving airspace
+            this.isControllable = false;
+            this._contactAircraftAfterControllabilityChange();
+
+            return;
+        }
+
+        this.isControllable = shouldBeControllable;
         this._contactAircraftAfterControllabilityChange();
     }
 

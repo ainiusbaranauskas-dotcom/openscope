@@ -308,7 +308,7 @@ export default class AirportModel {
      * @return {number}
      */
     get minAssignableAltitude() {
-        return _ceil(this.elevation + 1000, -2);
+        return _ceil(this.elevation + 2000, -2);
     }
 
     /**

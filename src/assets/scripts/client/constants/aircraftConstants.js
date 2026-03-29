@@ -251,7 +251,7 @@ export const PERFORMANCE = {
      * @type {number}
      * @final
      */
-    TYPICAL_CLIMB_FACTOR: 0.7,
+    TYPICAL_CLIMB_FACTOR: 0.85,
 
     /**
      * Standard pressure, the baseline used universally, is 1013.25 hPa, which is equivalent to 1013.25 mb or 29.92 inHg
@@ -260,7 +260,43 @@ export const PERFORMANCE = {
      * @type {number}
      * @final
      */
-    DEFAULT_ALTIMETER_IN_INHG: 29.92
+    DEFAULT_ALTIMETER_IN_INHG: 29.92,
+
+    /**
+     * Speed target for arrivals below 6000ft AGL
+     *
+     * @property APPROACH_SPEED_BELOW_6000
+     * @type {number}
+     * @final
+     */
+    APPROACH_SPEED_BELOW_6000: 210,
+
+    /**
+     * Speed target for arrivals below 4000ft and near the airport
+     *
+     * @property APPROACH_SPEED_BELOW_4000
+     * @type {number}
+     * @final
+     */
+    APPROACH_SPEED_BELOW_4000: 180,
+
+    /**
+     * Speed addend above landing speed for Vapp (approach speed)
+     *
+     * @property APPROACH_SPEED_ADDEND
+     * @type {number}
+     * @final
+     */
+    APPROACH_SPEED_ADDEND: 30,
+
+    /**
+     * Distance from airport (nm) within which the below-4000 speed gate applies
+     *
+     * @property APPROACH_DISTANCE_THRESHOLD_NM
+     * @type {number}
+     * @final
+     */
+    APPROACH_DISTANCE_THRESHOLD_NM: 12
 };
 
 /**

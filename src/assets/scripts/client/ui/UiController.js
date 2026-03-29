@@ -374,6 +374,9 @@ class UiController {
         this.$toggleSids = this.$element.find(SELECTORS.DOM_SELECTORS.TOGGLE_SIDS);
         this.$toggleSpeech = this.$element.find(SELECTORS.DOM_SELECTORS.TOGGLE_SPEECH);
         this.$toggleStars = this.$element.find(SELECTORS.DOM_SELECTORS.TOGGLE_STARS);
+        this.$toggleStarFixLabels = this.$element.find(SELECTORS.DOM_SELECTORS.TOGGLE_STAR_FIX_LABELS);
+        this.$toggleIafFixes = this.$element.find(SELECTORS.DOM_SELECTORS.TOGGLE_IAF_FIXES);
+        this.$toggleRunwayCenterline = this.$element.find(SELECTORS.DOM_SELECTORS.TOGGLE_RUNWAY_CENTERLINE);
         this.$toggleTerrain = this.$element.find(SELECTORS.DOM_SELECTORS.TOGGLE_TERRAIN);
         this.$toggleTraffic = this.$element.find(SELECTORS.DOM_SELECTORS.TOGGLE_TRAFFIC);
         this.$toggleTutorial = this.$element.find(SELECTORS.DOM_SELECTORS.TOGGLE_TUTORIAL);
@@ -426,6 +429,9 @@ class UiController {
         this.$toggleSids.on('click', (event) => this.onToggleSids(event));
         this.$toggleSpeech.on('click', (event) => speech_toggle(event));
         this.$toggleStars.on('click', (event) => this.onToggleStars(event));
+        this.$toggleStarFixLabels.on('click', (event) => this.onToggleStarFixLabels(event));
+        this.$toggleIafFixes.on('click', (event) => this.onToggleIafFixes(event));
+        this.$toggleRunwayCenterline.on('click', (event) => this.onToggleRunwayCenterline(event));
         this.$toggleTerrain.on('click', (event) => this.onToggleTerrain(event));
         this.$toggleTraffic.on('click', (event) => this.onToggleTraffic(event));
         this.$toggleTutorial.on('click', (event) => this.onToggleTutorial(event));
@@ -903,11 +909,23 @@ class UiController {
      * @param event {jquery event}
      */
     onToggleSids(event) {
-        this.$toggleSids.toggleClass(SELECTORS.CLASSNAMES.ACTIVE);
+        const MODES = ['none', 'all', '01', '19'];
+        const LABELS = ['SID display', 'SID: ALL', 'SID: RWY01', 'SID: RWY19'];
+
+        if (!this._sidModeIndex) {
+            this._sidModeIndex = 0;
+        }
+
+        this._sidModeIndex = (this._sidModeIndex + 1) % MODES.length;
+
+        const isActive = this._sidModeIndex !== 0;
+        this.$toggleSids.toggleClass(SELECTORS.CLASSNAMES.ACTIVE, isActive);
+        this.$toggleSids.find('span').text(LABELS[this._sidModeIndex]);
+
         EventTracker.recordEvent(
             TRACKABLE_EVENT.OPTIONS,
             'sids',
-            `${this.$toggleSids.hasClass(SELECTORS.CLASSNAMES.ACTIVE)}`
+            MODES[this._sidModeIndex]
         );
         this._eventBus.trigger(EVENT.TOGGLE_SID_MAP);
     }
@@ -918,13 +936,55 @@ class UiController {
      * @param event {jquery event}
      */
     onToggleStars(event) {
-        this.$toggleStars.toggleClass(SELECTORS.CLASSNAMES.ACTIVE);
+        const MODES = ['none', 'all', '01', '19'];
+        const LABELS = ['STAR display', 'STAR: ALL', 'STAR: RWY01', 'STAR: RWY19'];
+
+        if (!this._starModeIndex) {
+            this._starModeIndex = 0;
+        }
+
+        this._starModeIndex = (this._starModeIndex + 1) % MODES.length;
+
+        const isActive = this._starModeIndex !== 0;
+        this.$toggleStars.toggleClass(SELECTORS.CLASSNAMES.ACTIVE, isActive);
+        this.$toggleStars.find('span').text(LABELS[this._starModeIndex]);
+
         EventTracker.recordEvent(
             TRACKABLE_EVENT.OPTIONS,
             'stars',
-            `${this.$toggleStars.hasClass(SELECTORS.CLASSNAMES.ACTIVE)}`
+            MODES[this._starModeIndex]
         );
         this._eventBus.trigger(EVENT.TOGGLE_STAR_MAP);
+    }
+
+    /**
+     * @for UiController
+     * @method onToggleStarFixLabels
+     * @param event {jquery event}
+     */
+    onToggleStarFixLabels(event) {
+        this.$toggleStarFixLabels.toggleClass(SELECTORS.CLASSNAMES.ACTIVE);
+        this._eventBus.trigger(EVENT.TOGGLE_STAR_FIX_LABELS);
+    }
+
+    /**
+     * @for UiController
+     * @method onToggleIafFixes
+     * @param event {jquery event}
+     */
+    onToggleIafFixes(event) {
+        this.$toggleIafFixes.toggleClass(SELECTORS.CLASSNAMES.ACTIVE);
+        this._eventBus.trigger(EVENT.TOGGLE_IAF_FIXES);
+    }
+
+    /**
+     * @for UiController
+     * @method onToggleRunwayCenterline
+     * @param event {jquery event}
+     */
+    onToggleRunwayCenterline(event) {
+        this.$toggleRunwayCenterline.toggleClass(SELECTORS.CLASSNAMES.ACTIVE);
+        this._eventBus.trigger(EVENT.TOGGLE_RUNWAY_CENTERLINE);
     }
 
     /**

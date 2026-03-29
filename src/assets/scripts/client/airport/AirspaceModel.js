@@ -90,6 +90,16 @@ export default class AirspaceModel extends BaseModel {
          */
         this.labelRelativePositions = [];
 
+        /**
+         * Whether this airspace should be hidden from rendering
+         *
+         * @for AirspaceModel
+         * @property hidden
+         * @type {boolean}
+         * @default false
+         */
+        this.hidden = false;
+
         return this._init(data, airportPosition, magneticNorth);
     }
 
@@ -110,6 +120,7 @@ export default class AirspaceModel extends BaseModel {
         this.floor = convertToThousands(data.floor);
         this.ceiling = convertToThousands(data.ceiling);
         this.airspace_class = data.airspace_class;
+        this.hidden = data.hidden || false;
         this.poly = this._buildPolyPositionModels(data.poly, airportPosition, magneticNorth);
         this.relativePoly = _map(this.poly, (v) => v.relativePosition);
 

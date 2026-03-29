@@ -38,10 +38,10 @@ export default class ScopeModel {
          * @for ScopeModel
          * @property _ptlLength
          * @type {number} length in minutes
-         * @default 0
+         * @default 1
          * @private
          */
-        this._ptlLength = 0;
+        this._ptlLength = 1;
 
         // TODO: Use this!
         /**
