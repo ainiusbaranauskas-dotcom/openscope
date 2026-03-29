@@ -37,6 +37,43 @@ function isAuthenticated(req) {
     return !GATE_PASSWORD || (req.session && req.session.authenticated);
 }
 
+// Brute-force protection: 5 failed attempts per IP = locked for 15 min
+const loginAttempts = new Map();
+const MAX_ATTEMPTS = 5;
+const LOCKOUT_MS = 15 * 60 * 1000;
+
+function getClientIp(req) {
+    return req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.ip;
+}
+
+function isLockedOut(ip) {
+    const record = loginAttempts.get(ip);
+
+    if (!record) {
+        return false;
+    }
+
+    if (Date.now() - record.lastAttempt > LOCKOUT_MS) {
+        loginAttempts.delete(ip);
+
+        return false;
+    }
+
+    return record.count >= MAX_ATTEMPTS;
+}
+
+function recordFailedAttempt(ip) {
+    const record = loginAttempts.get(ip) || { count: 0, lastAttempt: 0 };
+
+    record.count++;
+    record.lastAttempt = Date.now();
+    loginAttempts.set(ip, record);
+}
+
+function clearAttempts(ip) {
+    loginAttempts.delete(ip);
+}
+
 // Login page HTML
 function getLoginPageHtml(error) {
     const errorHtml = error ? `<p class="error">${error}</p>` : '';
@@ -137,13 +174,29 @@ app.get('/login', (req, res) => {
 });
 
 app.post('/login', (req, res) => {
+    const ip = getClientIp(req);
+
+    if (isLockedOut(ip)) {
+        return res.status(429).send(getLoginPageHtml('Too many attempts. Try again in 15 minutes.'));
+    }
+
     if (req.body.password === GATE_PASSWORD) {
+        clearAttempts(ip);
         req.session.authenticated = true;
 
         return res.redirect('/');
     }
 
-    res.send(getLoginPageHtml('Incorrect password'));
+    recordFailedAttempt(ip);
+
+    const record = loginAttempts.get(ip);
+    const remaining = MAX_ATTEMPTS - record.count;
+
+    if (remaining <= 0) {
+        return res.status(429).send(getLoginPageHtml('Too many attempts. Try again in 15 minutes.'));
+    }
+
+    res.send(getLoginPageHtml(`Incorrect password (${remaining} attempts remaining)`));
 });
 
 // Auth middleware for all other routes
