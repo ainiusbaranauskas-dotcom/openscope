@@ -21,7 +21,7 @@ import { abs } from '../math/core';
 import { distance2d } from '../math/distance';
 import { speech_say } from '../speech';
 import { generateTransponderCode, isDiscreteTransponderCode, isValidTransponderCode } from '../utilities/transponderUtilities';
-import { km } from '../utilities/unitConverters';
+import { km, nm } from '../utilities/unitConverters';
 import { isEmptyOrNotArray } from '../utilities/validatorUtilities';
 import DynamicPositionModel from '../base/DynamicPositionModel';
 import { FLIGHT_CATEGORY, FLIGHT_PHASE } from '../constants/aircraftConstants';
@@ -394,10 +394,24 @@ export default class AircraftController {
      * @private
      */
     createAircraftWithSpawnPatternModel = (spawnPatternModel) => {
-        const spawnOverride = spawnPatternModel.getRandomizedSpawnPositionAndHeading();
-        const spawnPosition = spawnOverride
+        const isDepartureSpawn = spawnPatternModel.isDeparture();
+        let spawnOverride = spawnPatternModel.getRandomizedSpawnPositionAndHeading();
+        let spawnPosition = spawnOverride
             ? spawnOverride.positionModel.relativePosition
             : spawnPatternModel.relativePosition;
+
+        // Enforce minimum 55nm spawn distance from airport for arrivals/overflights only
+        if (!isDepartureSpawn) {
+            const MIN_SPAWN_DISTANCE_FROM_AIRPORT_NM = 55;
+            const airportPosition = AirportController.airport_get().relativePosition;
+            const distFromAirportNm = nm(distance2d(airportPosition, spawnPosition));
+
+            if (distFromAirportNm < MIN_SPAWN_DISTANCE_FROM_AIRPORT_NM) {
+                spawnOverride = null;
+                spawnPosition = spawnPatternModel.relativePosition;
+            }
+        }
+
         const MIN_SPAWN_SEPARATION_KM = km(8);
 
         for (let i = 0; i < this.aircraft.list.length; i++) {

@@ -626,7 +626,7 @@ export default class SpawnPatternModel extends BaseModel {
             return null;
         }
 
-        const MAX_OFFSET_NM = 5;
+        const MAX_OFFSET_NM = 50;
         const waypoints = this._routeModel.waypoints;
         const offsetNm = _random(0, MAX_OFFSET_NM, true);
 

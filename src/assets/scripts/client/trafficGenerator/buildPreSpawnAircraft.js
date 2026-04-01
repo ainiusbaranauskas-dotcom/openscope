@@ -333,8 +333,10 @@ const _assembleSpawnOffsets = (entrailDistance, totalDistance = 0) => {
         spawnOffsets.push(distanceAlongRoute);
     }
 
-    // spawn an aircraft at the first fix of the route
-    spawnOffsets.push(0);
+    // spawn an aircraft near the first fix of the route with random offset (0–50nm)
+    const MAX_ENTRY_OFFSET_NM = 50;
+    const entryOffset = _random(0, Math.min(MAX_ENTRY_OFFSET_NM, totalDistance * 0.5), true);
+    spawnOffsets.push(entryOffset);
 
     return spawnOffsets;
 };
@@ -418,10 +420,10 @@ const _preSpawn = (spawnPatternJson, airport) => {
     const waypointModelList = routeModel.waypoints;
     const totalDistance = _calculateTotalDistanceAlongRoute(waypointModelList, airport);
 
-    // Limit pre-spawn range to near the entry fix so aircraft appear far from the airport.
+    // Limit pre-spawn range so aircraft don't appear too close to the airport.
     // Offset 0 = entry fix (far), offset totalDistance = airspace boundary (close).
-    // Cap at 20nm from entry fix — aircraft spawn at cruise altitude near the boundary fixes.
-    const maxPreSpawnOffset = Math.min(totalDistance, 20);
+    // Cap at 70nm from entry fix to allow spread with randomized entry offset.
+    const maxPreSpawnOffset = Math.min(totalDistance, 70);
 
     // calculate number of offsets (capped to realistic range)
     const spawnOffsets = _assembleSpawnOffsets(entrailDistance, maxPreSpawnOffset);
@@ -435,7 +437,16 @@ const _preSpawn = (spawnPatternJson, airport) => {
         airspaceCeiling
     );
 
-    return spawnPositions;
+    // Filter out any pre-spawn positions closer than 55nm to the airport
+    const MIN_SPAWN_DISTANCE_NM = 55;
+    const airportPosition = airport.relativePosition;
+    const filteredPositions = spawnPositions.filter((spawn) => {
+        const distNm = nm(distance2d(airportPosition, spawn.positionModel.relativePosition));
+
+        return distNm >= MIN_SPAWN_DISTANCE_NM;
+    });
+
+    return filteredPositions;
 };
 
 /**
