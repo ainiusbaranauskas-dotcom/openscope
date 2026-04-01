@@ -41,7 +41,7 @@ export default class ScopeModel {
          * @default 1
          * @private
          */
-        this._ptlLength = 1;
+        this._ptlLength = 2;
 
         // TODO: Use this!
         /**

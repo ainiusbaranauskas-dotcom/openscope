@@ -59,7 +59,10 @@ export const KEY_CODES = {
     KEY_M: 'KeyM',
     // z - undo measure point
     KEY_Z: 'KeyZ',
-    BACKSPACE: 'Backspace'
+    BACKSPACE: 'Backspace',
+    // [ and ] - PTL length decrease/increase
+    BRACKET_LEFT: 'BracketLeft',
+    BRACKET_RIGHT: 'BracketRight'
 };
 
 /**

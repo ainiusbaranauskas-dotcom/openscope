@@ -723,12 +723,14 @@ export default class InputController {
                 break;
             case KEY_CODES.F1:
             case LEGACY_KEY_CODES.F1:
+            case KEY_CODES.BRACKET_LEFT:
                 event.preventDefault();
                 this._scopeModel.decreasePtlLength();
 
                 break;
             case KEY_CODES.F2:
             case LEGACY_KEY_CODES.F2:
+            case KEY_CODES.BRACKET_RIGHT:
                 event.preventDefault();
                 this._scopeModel.increasePtlLength();
 
