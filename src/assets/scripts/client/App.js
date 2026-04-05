@@ -1,10 +1,12 @@
 import $ from 'jquery';
 import _isNil from 'lodash/isNil';
 import _lowerCase from 'lodash/lowerCase';
+import AirportController from './airport/AirportController';
 import AppController from './AppController';
 import EventBus from './lib/EventBus';
 import TimeKeeper from './engine/TimeKeeper';
 import { DEFAULT_AIRPORT_ICAO } from './constants/airportConstants';
+import { KEY_CODES } from './constants/inputConstants';
 import { STORAGE_KEY } from './constants/storageKeys';
 import { EVENT } from './constants/eventNames';
 import { LOG } from './constants/logLevel';
@@ -42,6 +44,7 @@ export default class App {
          */
         this.$element = $(element);
         this._appController = new AppController(this.$element);
+        window.__appCtrl = this._appController;
         this.eventBus = EventBus;
 
         window.prop = prop;
@@ -128,6 +131,78 @@ export default class App {
         this.onUpdateHandler = this.update.bind(this);
 
         this.eventBus.on(EVENT.PAUSE_UPDATE_LOOP, this.onPauseHandler);
+
+        // F9 toggles game mode — bound globally so it works regardless of active mode
+        $(window).on('keydown', (event) => {
+            if (event.originalEvent && event.originalEvent.code === KEY_CODES.F9) {
+                event.preventDefault();
+                this.eventBus.trigger(EVENT.GAME_MODE_TOGGLE);
+            }
+        });
+
+        // Native listener fallback for F9 (covers programmatic dispatch)
+        window.addEventListener('keydown', (event) => {
+            if (event.code === 'F9') {
+                event.preventDefault();
+                this.eventBus.trigger(EVENT.GAME_MODE_TOGGLE);
+            }
+        });
+
+        // Expose toggle for testing
+        window.__toggleGameMode = () => this.eventBus.trigger(EVENT.GAME_MODE_TOGGLE);
+
+        // Expose tower command for testing: __towerCmd('BTI589', 'pb')
+        window.__towerCmd = (callsign, cmd) => {
+            const towerMode = this._appController.gameModeController.getMode('tower');
+
+            if (towerMode && towerMode.handleCommand) {
+                return towerMode.handleCommand(callsign, cmd);
+            }
+
+            return { success: false, message: 'Tower mode not available' };
+        };
+
+        // Expose debug helpers
+        window.__debugGraph = () => {
+            const airport = AirportController.current;
+            const graph = airport.taxiwayGraph;
+
+            if (!graph) return 'No taxiway graph';
+
+            window.__graph = graph;
+
+            const nodeCount = Object.keys(graph.nodes).length;
+            const edgeCount = graph.edges.length;
+            const path = graph.findPath('N475', 'HOLD_F5');
+
+            // Debug: check N475 edges
+            const n475 = graph.getNode('N475');
+            const n475Edges = n475 ? n475.edges.length : 'not found';
+            const n475Neighbors = n475 ? n475.edges.map((e) => e.to.name).join(',') : '';
+
+            return `Nodes: ${nodeCount}, Edges: ${edgeCount}, N475 edges: ${n475Edges} [${n475Neighbors}], Path: ${path ? path.length : 'NULL'}`;
+        };
+
+        // List tower aircraft for testing
+        window.__towerAircraft = () => {
+            const list = this._appController.aircraftController.aircraft.list;
+
+            return list
+                .filter((a) => a.groundMovementModel)
+                .map((a) => {
+                    const gmm = a.groundMovementModel;
+                    const pos = a.relativePosition;
+                    const gPos = a._groundRelativePosition;
+
+                    return `${a.callsign} phase=${a.flightPhase} gate=${gmm.assignedGateName || '?'} ` +
+                        `moving=${gmm.isMoving} spd=${gmm.groundSpeedKt.toFixed(1)} ` +
+                        `holding=${gmm.isHoldingShort} dest=${gmm.hasReachedDestination} ` +
+                        `pathIdx=${gmm._currentPathIndex}/${gmm._path.length} ` +
+                        `pos=[${pos[0].toFixed(4)},${pos[1].toFixed(4)}] ` +
+                        `gndPos=${gPos ? '[' + gPos[0].toFixed(4) + ',' + gPos[1].toFixed(4) + ']' : 'null'}`;
+                })
+                .join('\n');
+        };
 
         return this;
     }

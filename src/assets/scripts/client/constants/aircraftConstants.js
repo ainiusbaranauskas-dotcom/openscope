@@ -112,7 +112,45 @@ export const FLIGHT_PHASE = {
      * @property LANDING
      * @type {string}
      */
-    LANDING: 'LANDING'
+    LANDING: 'LANDING',
+
+    // Tower/ground control phases (active when airport has ground data)
+
+    /**
+     * Aircraft is pushing back from the gate
+     *
+     * @memberof FLIGHT_PHASE
+     * @property PUSHBACK
+     * @type {string}
+     */
+    PUSHBACK: 'PUSHBACK',
+
+    /**
+     * Aircraft is taxiing from gate/apron toward the runway
+     *
+     * @memberof FLIGHT_PHASE
+     * @property TAXI_OUT
+     * @type {string}
+     */
+    TAXI_OUT: 'TAXI_OUT',
+
+    /**
+     * Aircraft is taxiing from the runway to the gate after landing
+     *
+     * @memberof FLIGHT_PHASE
+     * @property TAXI_IN
+     * @type {string}
+     */
+    TAXI_IN: 'TAXI_IN',
+
+    /**
+     * Aircraft is holding short of a runway, awaiting clearance
+     *
+     * @memberof FLIGHT_PHASE
+     * @property HOLD_SHORT
+     * @type {string}
+     */
+    HOLD_SHORT: 'HOLD_SHORT'
 };
 
 /**
@@ -269,7 +307,7 @@ export const PERFORMANCE = {
      * @type {number}
      * @final
      */
-    APPROACH_SPEED_BELOW_6000: 210,
+    APPROACH_SPEED_BELOW_6000: 200,
 
     /**
      * Speed target for arrivals below 4000ft and near the airport
@@ -278,7 +316,7 @@ export const PERFORMANCE = {
      * @type {number}
      * @final
      */
-    APPROACH_SPEED_BELOW_4000: 180,
+    APPROACH_SPEED_BELOW_4000: 170,
 
     /**
      * Speed addend above landing speed for Vapp (approach speed)
@@ -287,7 +325,7 @@ export const PERFORMANCE = {
      * @type {number}
      * @final
      */
-    APPROACH_SPEED_ADDEND: 30,
+    APPROACH_SPEED_ADDEND: 10,
 
     /**
      * Distance from airport (nm) within which the below-4000 speed gate applies
@@ -296,7 +334,16 @@ export const PERFORMANCE = {
      * @type {number}
      * @final
      */
-    APPROACH_DISTANCE_THRESHOLD_NM: 12
+    APPROACH_DISTANCE_THRESHOLD_NM: 12,
+
+    /**
+     * Maximum IAS for departures above 10,000ft (standard climb schedule: 280/.78)
+     *
+     * @property DEPARTURE_CLIMB_SPEED_ABOVE_10K
+     * @type {number}
+     * @final
+     */
+    DEPARTURE_CLIMB_SPEED_ABOVE_10K: 280
 };
 
 /**

@@ -170,6 +170,17 @@ export default class AircraftModel {
         this.shouldTakeOffWhenRunwayIsClear = false;
 
         /**
+         * Flag to ensure the automatic HOLD→VNAV speed mode switch
+         * between 3000-4000 ft only happens once per aircraft
+         *
+         * @for AircraftModel
+         * @property _hasAutoSwitchedSpeedToVnav
+         * @type {boolean}
+         * @default false
+         */
+        this._hasAutoSwitchedSpeedToVnav = false;
+
+        /**
          * Trasponder code
          *
          * Initially generated and assined on instantiation by the `AircraftController`
@@ -395,6 +406,26 @@ export default class AircraftModel {
         this.isControllable = false;
 
         /**
+         * Tracks whether an arrival has made its initial radio callUp
+         *
+         * @for AircraftModel
+         * @property _hasCalledUp
+         * @type {boolean}
+         * @default false
+         */
+        this._hasCalledUp = false;
+
+        /**
+         * Tracks whether aircraft was inside airspace on the previous frame
+         *
+         * @for AircraftModel
+         * @property _wasInsideAirspace
+         * @type {boolean}
+         * @default false
+         */
+        this._wasInsideAirspace = false;
+
+        /**
          * List of aircraft that MAY be in conflict (bounding box)
          *
          * @for AircraftModel
@@ -494,6 +525,19 @@ export default class AircraftModel {
          * @type {Pilot}
          */
         this.pilot = new Pilot(this.fms, this.mcp);
+
+        /**
+         * Ground movement model for tower mode taxi operations.
+         * Set externally by AircraftController.createTowerDeparture().
+         * When non-null, the aircraft position is driven by this model.
+         *
+         * @for AircraftModel
+         * @property groundMovementModel
+         * @type {GroundMovementModel|null}
+         */
+        this.groundMovementModel = null;
+        this._groundRelativePosition = null;
+        this.isTowerDeparture = false;
 
         this.takeoffTime = options.category === FLIGHT_CATEGORY.ARRIVAL ?
             TimeKeeper.accumulatedDeltaTime :
@@ -607,6 +651,11 @@ export default class AircraftModel {
      * @type {array<number>} [kilometersNorth, kilometersEast]
      */
     get relativePosition() {
+        // Ground movement model overrides position for tower mode aircraft
+        if (this._groundRelativePosition) {
+            return this._groundRelativePosition;
+        }
+
         return this.positionModel.relativePosition;
     }
 
@@ -670,8 +719,9 @@ export default class AircraftModel {
         this.targetHeading = this.heading;
         this.target.speed = this.speed;
 
-        // This assumes and arrival spawns outside the airspace
-        this.isControllable = data.category === FLIGHT_CATEGORY.DEPARTURE;
+        // All aircraft are controllable from spawn
+        this.isControllable = true;
+        this._wasInsideAirspace = data.category === FLIGHT_CATEGORY.DEPARTURE;
     }
 
     /**
@@ -1091,7 +1141,11 @@ export default class AircraftModel {
     isTaxiing() {
         return this.flightPhase === FLIGHT_PHASE.APRON ||
             this.flightPhase === FLIGHT_PHASE.TAXI ||
-            this.flightPhase === FLIGHT_PHASE.WAITING;
+            this.flightPhase === FLIGHT_PHASE.WAITING ||
+            this.flightPhase === FLIGHT_PHASE.PUSHBACK ||
+            this.flightPhase === FLIGHT_PHASE.TAXI_OUT ||
+            this.flightPhase === FLIGHT_PHASE.TAXI_IN ||
+            this.flightPhase === FLIGHT_PHASE.HOLD_SHORT;
     }
 
     /**
@@ -1370,6 +1424,17 @@ export default class AircraftModel {
      * @method updateTarget
      */
     updateTarget() {
+        // Auto-switch from HOLD to VNAV between 3000-4000 ft for arrivals
+        if (!this._hasAutoSwitchedSpeedToVnav
+            && this.isArrival()
+            && this.mcp.speedMode === MCP_MODE.SPEED.HOLD
+            && this.altitude <= 4000
+            && this.altitude >= 3000
+        ) {
+            this.mcp.setSpeedVnav();
+            this._hasAutoSwitchedSpeedToVnav = true;
+        }
+
         this.target.altitude = _defaultTo(this._calculateTargetedAltitude(), this.target.altitude);
 
         this._updateTargetedDirectionality();
@@ -1463,6 +1528,11 @@ export default class AircraftModel {
             this.target.speed = Math.min(this.target.speed, AIRPORT_CONSTANTS.MAX_SPEED_BELOW_10K_FEET);
         }
 
+        // Limit departure climb speed above 10,000ft to realistic IAS (standard 280kt climb schedule)
+        if (!this.isArrival() && this.altitude >= 10000) {
+            this.target.speed = Math.min(this.target.speed, PERFORMANCE.DEPARTURE_CLIMB_SPEED_ABOVE_10K);
+        }
+
         if (this.target.altitude > this.model.ceiling) {
             this.target.altitude = this.model.ceiling;
         }
@@ -1535,6 +1605,7 @@ export default class AircraftModel {
                 if ((this.altitude - runwayModel.elevation) > PERFORMANCE.TAKEOFF_TURN_ALTITUDE) {
                     this.pilot.raiseLandingGearAndActivateAutopilot();
                     this.setFlightPhase(FLIGHT_PHASE.CLIMB);
+                    this.isTowerDeparture = false;
                 }
 
                 break;
@@ -1555,6 +1626,8 @@ export default class AircraftModel {
 
             case FLIGHT_PHASE.DESCENT:
                 if (this.pilot.hasApproachClearance && this.isEstablishedOnCourse()) {
+                    console.log(`[DEFERRED-ILS] ${this.callsign}: DESCENT -> APPROACH transition. ` +
+                        `alt=${Math.round(this.altitude)}, headingMode=${this.mcp.headingMode}`);
                     this.setFlightPhase(FLIGHT_PHASE.APPROACH);
 
                     if (!this.projected) {
@@ -1570,11 +1643,14 @@ export default class AircraftModel {
                 }
 
                 if (!this.isEstablishedOnGlidepath()) {
+                    console.log(`[DEFERRED-ILS] ${this.callsign}: APPROACH phase but NOT on glidepath. ` +
+                        `alt=${Math.round(this.altitude)}, cancelLanding called`);
                     this.cancelLanding();
 
                     break;
                 }
 
+                console.log(`[DEFERRED-ILS] ${this.callsign}: APPROACH -> LANDING transition`);
                 this.setFlightPhase(FLIGHT_PHASE.LANDING);
 
                 if (!this.projected) {
@@ -1921,6 +1997,20 @@ export default class AircraftModel {
 
         if (shouldMoveToNextFix) {
             if (!this.fms.hasNextWaypoint()) {
+                console.log(`[DEFERRED-ILS] ${this.callsign}: Last waypoint reached. ` +
+                    `hasDeferredApproach=${!!this.pilot._deferredApproachRunwayModel}, ` +
+                    `headingMode=${this.mcp.headingMode}, altitudeMode=${this.mcp.altitudeMode}, ` +
+                    `alt=${Math.round(this.altitude)}, flightPhase=${this.flightPhase}`);
+
+                // Check for deferred ILS approach clearance (via-fix command)
+                if (this.pilot.activateDeferredApproach()) {
+                    console.log(`[DEFERRED-ILS] ${this.callsign}: Deferred approach ACTIVATED. ` +
+                        `headingMode=${this.mcp.headingMode}, altitudeMode=${this.mcp.altitudeMode}, ` +
+                        `mcpAlt=${this.mcp.altitude}, hasApproachClearance=${this.pilot.hasApproachClearance}`);
+                    // ILS mode activated -- VOR_LOC heading mode takes over from here
+                    return this.groundTrack;
+                }
+
                 // we've hit this block because and aircraft is about to fly over the last waypoint in its flightPlan
                 this.pilot.maintainPresentHeading(this);
 
@@ -2812,6 +2902,30 @@ export default class AircraftModel {
      * @method update
      */
     update() {
+        // Ground movement model drives position for tower mode aircraft
+        if (this.groundMovementModel) {
+            const gmm = this.groundMovementModel;
+            const hasActivePath = gmm._path.length >= 2 && !gmm.hasReachedDestination;
+
+            if (hasActivePath) {
+                const dt = TimeKeeper.getDeltaTimeForGameStateAndTimewarp();
+                const state = gmm.update(dt);
+
+                if (state) {
+                    this._groundRelativePosition = state.relativePosition;
+                    this.heading = state.heading;
+                    this.groundSpeed = state.groundSpeed;
+                }
+
+                // Update hold-short phase
+                if (gmm.isHoldingShort && this.flightPhase !== FLIGHT_PHASE.HOLD_SHORT) {
+                    this.setFlightPhase(FLIGHT_PHASE.HOLD_SHORT);
+                }
+            }
+
+            return;
+        }
+
         this.updateFlightPhase();
         this.updateTarget();
         this.updatePhysics();
@@ -2906,17 +3020,12 @@ export default class AircraftModel {
 
         const isInsideAirspace = this.isInsideAirspace(AirportController.airport_get());
 
-        // For arrivals not yet in airspace, check if they'll enter within ~3 minutes
-        // Project position forward and test if that projected point is inside airspace
-        let shouldBeControllable = isInsideAirspace;
+        // For arrivals: trigger callUp when entering airspace (same timing as before)
+        if (this.isArrival() && !this._hasCalledUp) {
+            let shouldCallUp = isInsideAirspace;
 
-        if (!isInsideAirspace && this.isArrival()) {
-            if (this.isControllable) {
-                // Already contacted — keep controllable while approaching airspace
-                // to prevent flip-flopping between controllable/not-controllable
-                shouldBeControllable = true;
-            } else {
-                // Not yet contacted — check if they'll enter within ~3 minutes
+            if (!isInsideAirspace) {
+                // Early contact: check if they'll enter within ~3 minutes
                 const EARLY_CONTACT_MINUTES = 3;
                 const nmPerMinute = this.groundSpeed / TIME.ONE_HOUR_IN_MINUTES;
                 const lookAheadNm = nmPerMinute * EARLY_CONTACT_MINUTES;
@@ -2927,27 +3036,22 @@ export default class AircraftModel {
                 const airport = AirportController.airport_get();
 
                 if (airport.isPointWithinAirspace([projectedX, projectedY], this.altitude)) {
-                    shouldBeControllable = true;
+                    shouldCallUp = true;
                 }
+            }
+
+            if (shouldCallUp) {
+                this._hasCalledUp = true;
+                this.callUp();
             }
         }
 
-        if (this.isControllable === shouldBeControllable) {
-            return;
+        // For departures exiting airspace: fire exit event for scoring
+        if (this.isDeparture() && this._wasInsideAirspace && !isInsideAirspace) {
+            EventBus.trigger(AIRCRAFT_EVENT.AIRSPACE_EXIT, this);
         }
 
-        // Only allow transitions: not-controllable → controllable (early contact or entering)
-        // and controllable → not-controllable (exiting airspace)
-        if (!shouldBeControllable && !isInsideAirspace) {
-            // Aircraft is leaving airspace
-            this.isControllable = false;
-            this._contactAircraftAfterControllabilityChange();
-
-            return;
-        }
-
-        this.isControllable = shouldBeControllable;
-        this._contactAircraftAfterControllabilityChange();
+        this._wasInsideAirspace = isInsideAirspace;
     }
 
     /**

@@ -14,6 +14,7 @@ import {
     zeroArgumentsValidator,
     singleArgumentValidator,
     zeroOrOneArgumentValidator,
+    oneOrTwoArgumentValidator,
     altitudeValidator,
     fixValidator,
     headingValidator,
@@ -158,7 +159,7 @@ const SINGLE_ARG_AIRCRAFT_COMMANDS = {
         parse: noop
     },
     ils: {
-        validate: singleArgumentValidator,
+        validate: oneOrTwoArgumentValidator,
         parse: ilsParser
     },
     land: {

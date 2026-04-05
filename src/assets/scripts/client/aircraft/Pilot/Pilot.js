@@ -75,6 +75,27 @@ export default class Pilot {
         this.hasApproachClearance = false;
 
         /**
+         * Runway model for a deferred ILS approach (via-fix command)
+         * When set, the ILS will activate automatically when the aircraft reaches its last waypoint
+         *
+         * @for Pilot
+         * @property _deferredApproachRunwayModel
+         * @type {RunwayModel|null}
+         * @default null
+         */
+        this._deferredApproachRunwayModel = null;
+
+        /**
+         * Approach type for a deferred ILS approach (eg 'ils')
+         *
+         * @for Pilot
+         * @property _deferredApproachType
+         * @type {string|null}
+         * @default null
+         */
+        this._deferredApproachType = null;
+
+        /**
          * Whether the aircraft has received an IFR clearance to their destination
          *
          * @for Pilot
@@ -96,6 +117,8 @@ export default class Pilot {
         this._fms = fms;
         this._mcp = modeController;
         this.hasApproachClearance = false;
+        this._deferredApproachRunwayModel = null;
+        this._deferredApproachType = null;
         this.hasDepartureClearance = false;
 
         return this;
@@ -110,6 +133,8 @@ export default class Pilot {
         this._fms = null;
         this._mcp = null;
         this.hasApproachClearance = false;
+        this._deferredApproachRunwayModel = null;
+        this._deferredApproachType = null;
         this.hasDepartureClearance = false;
 
         return this;
@@ -373,6 +398,12 @@ export default class Pilot {
      * @return {array} [success of operation, readback]
      */
     cancelApproachClearance(aircraftModel) {
+        // Also cancel deferred approach (via-fix ILS) even if hasApproachClearance is false
+        if (this._deferredApproachRunwayModel) {
+            this._deferredApproachRunwayModel = null;
+            this._deferredApproachType = null;
+        }
+
         if (!this.hasApproachClearance) {
             return [false, 'we have no approach clearance to cancel!'];
         }
@@ -389,6 +420,8 @@ export default class Pilot {
         this._mcp.setSpeedHold();
 
         this.hasApproachClearance = false;
+        this._deferredApproachRunwayModel = null;
+        this._deferredApproachType = null;
 
         const readback = 'cancel approach clearance, fly present heading, ' +
             'maintain last assigned altitude and speed';
@@ -809,6 +842,94 @@ export default class Pilot {
         readback.say = `cleared ${approachType.toUpperCase()} runway ${radio_runway(runwayModel.name)} approach`;
 
         return [true, readback];
+    }
+
+    /**
+     * Conduct a deferred instrument approach via a specified fix.
+     * The aircraft proceeds direct to the fix, continues following
+     * STAR waypoints (LNAV + VNAV), and automatically intercepts
+     * the ILS when it reaches the last waypoint.
+     *
+     * @for Pilot
+     * @method conductDeferredInstrumentApproach
+     * @param aircraftModel {AircraftModel}
+     * @param approachType {string}
+     * @param runwayModel {RunwayModel}
+     * @param viaFixName {string}
+     * @return {array} [success of operation, readback]
+     */
+    conductDeferredInstrumentApproach(aircraftModel, approachType, runwayModel, viaFixName) {
+        console.log(`[DEFERRED-ILS] conductDeferredInstrumentApproach called: via=${viaFixName}, rwy=${runwayModel ? runwayModel.name : 'null'}, type=${approachType}`);
+
+        if (_isNil(runwayModel)) {
+            return [false, 'the specified runway does not exist'];
+        }
+
+        if (!this._fms.hasWaypointName(viaFixName)) {
+            console.log(`[DEFERRED-ILS] Fix ${viaFixName} not in route`);
+            return [false, `unable, ${viaFixName} is not in our route`];
+        }
+
+        // Skip forward to the specified fix (proceed direct)
+        this._fms.skipToWaypointName(viaFixName);
+        this.cancelHoldingPattern();
+
+        // Stay in LNAV + VNAV to follow remaining STAR waypoints and descend per restrictions
+        this._mcp.setHeadingLnav();
+        this._mcp.setAltitudeVnav();
+
+        // Store runway info for deferred ILS activation at last waypoint
+        // NOTE: Do NOT set hasApproachClearance here -- it would cause premature
+        // flight phase transition (DESCENT → APPROACH) while still on LNAV.
+        // It gets set when activateDeferredApproach() fires at the last waypoint.
+        this._deferredApproachRunwayModel = runwayModel;
+        this._deferredApproachType = approachType;
+
+        this._fms.setArrivalRunway(runwayModel);
+
+        console.log(`[DEFERRED-ILS] Setup complete. headingMode=${this._mcp.headingMode}, altitudeMode=${this._mcp.altitudeMode}, ` +
+            `currentWaypoint=${this._fms.currentWaypoint ? this._fms.currentWaypoint.name : 'none'}, ` +
+            `hasNext=${this._fms.hasNextWaypoint()}`);
+
+        const readback = {};
+        readback.log = `proceed direct ${viaFixName}, descend via STAR, cleared ${approachType.toUpperCase()} runway ${runwayModel.name} approach`;
+        readback.say = `proceed direct ${viaFixName}, descend via STAR, cleared ${approachType.toUpperCase()} runway ${radio_runway(runwayModel.name)} approach`;
+
+        return [true, readback];
+    }
+
+    /**
+     * Activate a previously deferred instrument approach.
+     * Called when the aircraft reaches its last STAR waypoint.
+     * Switches from LNAV/VNAV to VOR_LOC/APPROACH mode.
+     *
+     * @for Pilot
+     * @method activateDeferredApproach
+     * @return {boolean} true if a deferred approach was activated
+     */
+    activateDeferredApproach() {
+        if (!this._deferredApproachRunwayModel) {
+            return false;
+        }
+
+        const runwayModel = this._deferredApproachRunwayModel;
+        const datum = runwayModel.positionModel;
+        const course = runwayModel.angle;
+        const descentAngle = runwayModel.ils.glideslopeGradient;
+
+        console.log(`[DEFERRED-ILS] activateDeferredApproach: rwy=${runwayModel.name}, ` +
+            `course=${course}, descentAngle=${descentAngle}, elevation=${runwayModel.elevation}`);
+
+        this._interceptCourse(datum, course);
+        this._interceptGlidepath(datum, course, descentAngle);
+
+        // Set approach clearance NOW (not earlier) to avoid premature flight phase transitions
+        this.hasApproachClearance = true;
+
+        this._deferredApproachRunwayModel = null;
+        this._deferredApproachType = null;
+
+        return true;
     }
 
     // TODO: Add ability to hold at present position

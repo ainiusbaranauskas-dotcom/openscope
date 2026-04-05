@@ -50,6 +50,28 @@ export default class RadarTargetModel {
         this._cruiseAltitude = INVALID_NUMBER;
 
         /**
+         * Informational altitude annotation set by the controller.
+         * Displayed on the right side of data block row 1.
+         * Empty string means show a dash "-".
+         *
+         * @for RadarTargetModel
+         * @property _annotatedAltitude
+         * @type {string}
+         * @default ''
+         */
+        this._annotatedAltitude = '';
+
+        /**
+         * Screen position of the annotation text area, updated each frame.
+         * Used for click hit-testing.
+         *
+         * @for RadarTargetModel
+         * @property _annotationScreenPosition
+         * @type {array|null}
+         */
+        this._annotationScreenPosition = null;
+
+        /**
          * Direction the data block is extended away from the radar target.
          * A value of -1 means to leave at default position.
          *
@@ -205,6 +227,21 @@ export default class RadarTargetModel {
     }
 
     /**
+     * Informational altitude annotation value
+     *
+     * @for RadarTargetModel
+     * @property annotatedAltitude
+     * @type {string}
+     */
+    get annotatedAltitude() {
+        return this._annotatedAltitude;
+    }
+
+    set annotatedAltitude(value) {
+        this._annotatedAltitude = value;
+    }
+
+    /**
      * Length of leader line connecting radar target and data block
      *
      * @for RadarTargetModel
@@ -334,6 +371,8 @@ export default class RadarTargetModel {
         this._interimAltitude = INVALID_NUMBER;
         this._isUnderOurControl = true;
         this._routeString = '';
+        this._annotatedAltitude = '';
+        this._annotationScreenPosition = null;
 
         return this;
     }
@@ -368,6 +407,9 @@ export default class RadarTargetModel {
             // NOTE: using empty space before the letter on purpose so this gets rendered appropriately within a canvas
             dataBlockRowOne += ` ${wtc.LETTER}`;
         }
+
+        const annotation = this._annotatedAltitude || '-';
+        dataBlockRowOne += ` ${annotation}`;
 
         return dataBlockRowOne;
     }

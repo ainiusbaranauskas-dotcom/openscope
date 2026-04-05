@@ -12,6 +12,9 @@ import EventTracker from './EventTracker';
 import GameController from './game/GameController';
 import InputController from './InputController';
 import EventBus from './lib/EventBus';
+import GameModeController from './gameMode/GameModeController';
+import ApproachMode from './gameMode/ApproachMode';
+import TowerMode from './gameMode/TowerMode';
 import LoadingView from './LoadingView';
 import NavigationLibrary from './navigationLibrary/NavigationLibrary';
 import ScopeModel from './scope/ScopeModel';
@@ -88,6 +91,7 @@ export default class AppController {
     setupHandlers() {
         this.onAirportChangeHandler = this.onAirportChange.bind(this);
         this.onTrafficResetHandler = this.onTrafficReset.bind(this);
+        this.onGameModeToggleHandler = this.onGameModeToggle.bind(this);
 
         return this;
     }
@@ -100,6 +104,7 @@ export default class AppController {
     enable() {
         this._eventBus.on(EVENT.AIRPORT_CHANGE, this.onAirportChangeHandler);
         this._eventBus.on(EVENT.TRAFFIC_RESET, this.onTrafficResetHandler);
+        this._eventBus.on(EVENT.GAME_MODE_TOGGLE, this.onGameModeToggleHandler);
 
         return this;
     }
@@ -205,6 +210,20 @@ export default class AppController {
         this.inputController.setCoopController(this.coopController);
         this.aircraftController.setCoopController(this.coopController);
 
+        // Register game modes
+        this.gameModeController = GameModeController;
+        this.gameModeController.registerMode('approach', new ApproachMode(
+            this.canvasController,
+            this.inputController,
+            this.aircraftController,
+            this.scopeModel
+        ));
+        this.gameModeController.registerMode('tower', new TowerMode(
+            this.$canvasesElement,
+            this.aircraftController
+        ));
+        this.gameModeController.initializeModes('approach');
+
         // When joining as guest, clear local aircraft — host will sync state
         this._eventBus.on(COOP_EVENT.ROOM_JOINED, () => {
             this.aircraftController.aircraft_remove_all();
@@ -274,7 +293,7 @@ export default class AppController {
     updatePre() {
         this.airportInfoController.updateClock();
         GameController.update_pre();
-        this.aircraftController.update();
+        this.gameModeController.update();
     }
 
     /**
@@ -288,8 +307,7 @@ export default class AppController {
      * @method updatePost
      */
     updatePost() {
-        this.canvasController.canvasUpdatePost();
-        this.aircraftController.updateAircraftStrips();
+        this.gameModeController.render();
     }
 
 
@@ -331,6 +349,8 @@ export default class AppController {
         SpawnPatternCollection.init(nextAirportJson);
         SpawnScheduler.startScheduler();
 
+        this.gameModeController.initializeModes('approach');
+
         this.updateViewControls();
     }
 
@@ -347,6 +367,16 @@ export default class AppController {
         AirportController.current.resetAllRunwayQueues();
         SpawnScheduler.createPreSpawnDepartures();
         SpawnScheduler.resetAirborneTraffic();
+    }
+
+    /**
+     * Cycle to the next available game mode
+     *
+     * @for AppController
+     * @method onGameModeToggle
+     */
+    onGameModeToggle() {
+        this.gameModeController.cycleMode();
     }
 
     // TODO: this should live in a view class somewhere. temporary inclusion here to prevent tests from failing

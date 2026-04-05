@@ -29,8 +29,15 @@ const HOLD_COMMAND_ARG_NAMES = {
  * @function ilsParser
  * @param args {array}
  */
-// TODO: define the second value
-export const ilsParser = (args) => [null, args[0]];
+// When 2 args: [fixName, runway] (via-fix ILS approach)
+// When 1 arg:  [null, runway] (immediate ILS approach)
+export const ilsParser = (args) => {
+    if (args.length === 2) {
+        return [args[0], args[1]];
+    }
+
+    return [null, args[0]];
+};
 
 /**
  * Converts a flight level altitude to a number in thousands and converts second arg to a boolean

@@ -10,6 +10,8 @@ import AirspaceModel from './AirspaceModel';
 import DynamicPositionModel from '../base/DynamicPositionModel';
 import EventBus from '../lib/EventBus';
 import GameController from '../game/GameController';
+import GateCollection from './ground/GateCollection';
+import TaxiwayGraph from './ground/TaxiwayGraph';
 import MapCollection from './MapCollection';
 import RunwayCollection from './runway/RunwayCollection';
 import StaticPositionModel from '../base/StaticPositionModel';
@@ -170,6 +172,33 @@ export default class AirportModel {
          * @default null
          */
         this.mapCollection = null;
+
+        /**
+         * Raw ground data from airport JSON (gates, taxiways, apronGeometry)
+         *
+         * @property groundData
+         * @type {object|null}
+         * @default null
+         */
+        this.groundData = null;
+
+        /**
+         * Collection of gates/parking stands for tower mode
+         *
+         * @property gateCollection
+         * @type {GateCollection|null}
+         * @default null
+         */
+        this.gateCollection = null;
+
+        /**
+         * Taxiway graph for A* pathfinding in tower mode
+         *
+         * @property taxiwayGraph
+         * @type {TaxiwayGraph|null}
+         * @default null
+         */
+        this.taxiwayGraph = null;
 
         /**
          * @property restricted_areas
@@ -349,6 +378,17 @@ export default class AirportModel {
     }
 
     /**
+     * Whether this airport has ground data (gates, taxiways) for tower mode
+     *
+     * @for AirportModel
+     * @method hasGroundData
+     * @return {boolean}
+     */
+    hasGroundData() {
+        return this.groundData !== null && this.groundData !== undefined;
+    }
+
+    /**
      * @for AirportModel
      * @method init
      * @param data {object}
@@ -376,6 +416,9 @@ export default class AirportModel {
         this.mapCollection = new MapCollection(data.maps, data.defaultMaps, this.positionModel, this.magneticNorth);
         this.defaultWind.speed = data.wind.speed;
         this.defaultWind.angle = degreesToRadians(data.wind.angle);
+
+        this.groundData = _get(data, 'ground', null);
+        this._initGroundData();
 
         this._initRangeRings(data.rangeRings);
         this.loadTerrain();
@@ -409,6 +452,38 @@ export default class AirportModel {
             ),
             radius_nm: rangeRingData.radius_nm
         };
+    }
+
+    /**
+     * Initialize ground data models (gates, taxiway graph) from airport JSON
+     *
+     * @for AirportModel
+     * @method _initGroundData
+     * @private
+     */
+    _initGroundData() {
+        if (!this.groundData) {
+            this.gateCollection = null;
+            this.taxiwayGraph = null;
+
+            return;
+        }
+
+        if (this.groundData.gates) {
+            this.gateCollection = new GateCollection(
+                this.groundData.gates,
+                this._positionModel,
+                this.magneticNorth
+            );
+        }
+
+        if (this.groundData.taxiways) {
+            this.taxiwayGraph = new TaxiwayGraph(
+                this.groundData.taxiways,
+                this._positionModel,
+                this.magneticNorth
+            );
+        }
     }
 
     /**

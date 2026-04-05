@@ -387,6 +387,26 @@ export default class CanvasController {
     }
 
     /**
+     * Show the canvases managed by this controller
+     *
+     * @for CanvasController
+     * @method show
+     */
+    show() {
+        this.$element.show();
+    }
+
+    /**
+     * Hide the canvases managed by this controller
+     *
+     * @for CanvasController
+     * @method hide
+     */
+    hide() {
+        this.$element.hide();
+    }
+
+    /**
      * Called by `AppController.complete()`
      *
      * @for CanvasController
@@ -1781,6 +1801,15 @@ export default class CanvasController {
         cc.fillText(row1text, leftX, -(gap + lineheight));
         cc.fillText(row2text, leftX, 0);
         cc.fillText(row3text, leftX, (gap + lineheight));
+
+        // Store annotation hit zone position (right portion of row 1) in absolute canvas coords
+        const annotationText = radarTargetModel.annotatedAltitude || '-';
+        const annotationWidth = cc.measureText(` ${annotationText}`).width;
+        const row1FullWidth = cc.measureText(row1text).width;
+        const annotationCenterX = dataBlockCenterCanvasPosition[0] + leftX + row1FullWidth - (annotationWidth / 2);
+        const annotationCenterY = dataBlockCenterCanvasPosition[1] - (gap + lineheight);
+        radarTargetModel._annotationScreenPosition = [annotationCenterX, annotationCenterY];
+
         cc.font = BASE_CANVAS_FONT;
 
         cc.restore();

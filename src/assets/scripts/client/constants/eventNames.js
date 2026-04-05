@@ -338,7 +338,25 @@ export const EVENT = {
      * @property ZOOM_VIEWPORT
      * @type {string}
      */
-    ZOOM_VIEWPORT: 'zoom-viewport'
+    ZOOM_VIEWPORT: 'zoom-viewport',
+
+    /**
+     * Fired when the active game mode changes (approach, tower, etc.)
+     *
+     * @memberof EVENT
+     * @property GAME_MODE_CHANGE
+     * @type {string}
+     */
+    GAME_MODE_CHANGE: 'game-mode-change',
+
+    /**
+     * Request to cycle to the next available game mode
+     *
+     * @memberof EVENT
+     * @property GAME_MODE_TOGGLE
+     * @type {string}
+     */
+    GAME_MODE_TOGGLE: 'game-mode-toggle'
 };
 
 export const COOP_EVENT = {

@@ -303,7 +303,8 @@ export default class CoopController {
                     mcpHeading: aircraft.mcp ? aircraft.mcp.heading : 0,
                     mcpSpeed: aircraft.mcp ? aircraft.mcp.speed : 0,
                     transponderCode: aircraft.transponderCode,
-                    trend: aircraft.trend
+                    trend: aircraft.trend,
+                    flightPhase: aircraft.flightPhase
                 });
             } catch (error) {
                 console.warn(`[Coop] Failed to serialize aircraft: ${error.message}`);

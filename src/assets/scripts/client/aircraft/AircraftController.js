@@ -16,6 +16,8 @@ import StripViewController from './StripView/StripViewController';
 import GameController, { GAME_EVENTS } from '../game/GameController';
 import CommandParser from '../commands/parsers/CommandParser';
 import { airlineNameAndFleetHelper } from '../airline/airlineHelpers';
+import GroundMovementModel from './GroundMovementModel';
+import SpawnPatternCollection from '../trafficGenerator/SpawnPatternCollection';
 import { convertStaticPositionToDynamic } from '../base/staticPositionToDynamicPositionHelper';
 import { abs } from '../math/core';
 import { distance2d } from '../math/distance';
@@ -243,6 +245,22 @@ export default class AircraftController {
             }
 
             aircraft.transponderCode = state.transponderCode;
+
+            // Sync flight phase so departures transition through WAITING → TAKEOFF → CLIMB etc.
+            // Without this, guest departures stay in WAITING forever (physics skipped),
+            // blocking the runway queue and hiding subsequent departures via isVisible()
+            if (state.flightPhase && aircraft.flightPhase !== state.flightPhase) {
+                const wasOnGround = aircraft.flightPhase === FLIGHT_PHASE.WAITING ||
+                    aircraft.flightPhase === FLIGHT_PHASE.APRON ||
+                    aircraft.flightPhase === FLIGHT_PHASE.TAXI;
+
+                aircraft.setFlightPhase(state.flightPhase);
+
+                // Remove from runway queue when departure leaves the ground
+                if (wasOnGround && aircraft.fms.departureRunwayModel) {
+                    aircraft.fms.departureRunwayModel.removeAircraftFromQueue(aircraft.id);
+                }
+            }
         }
 
         if (this._remoteSyncCount <= 3) {
@@ -489,6 +507,107 @@ export default class AircraftController {
     };
 
     /**
+     * Create a departure aircraft at a gate for tower mode.
+     * The aircraft is placed at the gate position in APRON phase with speed 0.
+     * No FMS route or auto-tower logic is applied.
+     *
+     * @for AircraftController
+     * @method createTowerDeparture
+     * @param gate {GateModel}
+     * @return {AircraftModel|null}
+     */
+    createTowerDeparture(gate, airlineIcao) {
+        const airport = AirportController.airport_get();
+        const airlineModel = this._airlineController.findAirlineById(airlineIcao);
+
+        if (!airlineModel) {
+            console.warn(`[Tower] Airline "${airlineIcao}" not found, using AAL`);
+
+            return this.createTowerDeparture(gate, 'aal');
+        }
+
+        const flightNumber = this._airlineController.generateFlightNumberWithAirlineModel(airlineModel);
+        const aircraftTypeDefinition = this.aircraftTypeDefinitionCollection
+            .getAircraftDefinitionForAirlineId(airlineModel.icao, airlineModel);
+
+        if (!aircraftTypeDefinition) {
+            console.warn('[Tower] No aircraft type definition available');
+
+            return null;
+        }
+
+        // Get a valid departure route from spawn patterns
+        const departureRoute = this._getRandomDepartureRoute();
+        const dynamicPositionModel = convertStaticPositionToDynamic(gate.positionModel);
+        const transponderCode = this._generateUniqueTransponderCode(airport.icao);
+
+        const initProps = {
+            fleet: aircraftTypeDefinition.icao,
+            altitude: airport.elevation,
+            transponderCode,
+            origin: airport.icao,
+            destination: airport.icao,
+            callsign: flightNumber,
+            category: FLIGHT_CATEGORY.DEPARTURE,
+            airline: airlineModel.icao,
+            airlineCallsign: airlineModel.radioName,
+            speed: 0,
+            heading: gate.heading * (Math.PI / 180),
+            positionModel: dynamicPositionModel,
+            icao: aircraftTypeDefinition.icao,
+            model: aircraftTypeDefinition,
+            routeString: departureRoute,
+            commands: {}
+        };
+
+        try {
+            const aircraftModel = new AircraftModel(initProps);
+
+            this._eventBus.trigger(EVENT.ADD_AIRCRAFT, aircraftModel);
+
+            // For tower mode: keep at gate in APRON phase, don't move to runway
+            aircraftModel.setFlightPhase(FLIGHT_PHASE.APRON);
+
+            // Attach ground movement model for taxi operations
+            aircraftModel.groundMovementModel = new GroundMovementModel();
+            aircraftModel.groundMovementModel.setAssignedGate(gate.name);
+
+            // Create strip view
+            this._stripViewController.createStripView(aircraftModel);
+
+            return aircraftModel;
+        } catch (error) {
+            console.error('[Tower] Failed to create departure:', error.message);
+
+            return null;
+        }
+    }
+
+    /**
+     * Get a random valid departure route string from the airport's spawn patterns
+     *
+     * @for AircraftController
+     * @method _getRandomDepartureRoute
+     * @param airport {AirportModel}
+     * @return {string}
+     * @private
+     */
+    _getRandomDepartureRoute() {
+        const departures = SpawnPatternCollection.spawnPatternModels.filter(
+            (sp) => sp.category === FLIGHT_CATEGORY.DEPARTURE
+        );
+
+        if (departures.length > 0) {
+            const pattern = departures[Math.floor(Math.random() * departures.length)];
+
+            return pattern.routeString;
+        }
+
+        // Last resort fallback
+        return 'EYVI01.ATMEZ1A.ATMEZ';
+    }
+
+    /**
      * @for AircraftController
      * @method aircraft_auto_toggle
      */
@@ -598,9 +717,8 @@ export default class AircraftController {
                 continue;
             }
 
-            // TODO: conflict checking eats up a lot of resources when there are more than
-            //       30 aircraft, exit early if we're still taxiing
-            if (aircraftModel.isTaxiing()) {
+            // Skip conflict/visibility checks for taxiing aircraft and recent tower departures
+            if (aircraftModel.isTaxiing() || aircraftModel.isTowerDeparture) {
                 continue;
             }
 
@@ -1177,9 +1295,6 @@ export default class AircraftController {
             );
         }
 
-        // Clean up the screen from aircraft that are too far
-        if (!this.isAircraftVisible(aircraftModel, 2) && !aircraftModel.isControllable && aircraftModel.isRemovable) {
-            this.aircraft_remove(aircraftModel);
-        }
+        // Aircraft are never auto-removed — all aircraft remain controllable everywhere
     }
 }

@@ -747,8 +747,15 @@ export default class AircraftCommander {
      */
     runIls(aircraft, data) {
         const approachType = 'ils';
+        const viaFixName = data[0] ? data[0].toUpperCase() : null;
         const runwayName = data[1].toUpperCase();
         const runwayModel = AirportController.airport_get().getRunway(runwayName);
+
+        if (viaFixName) {
+            return aircraft.pilot.conductDeferredInstrumentApproach(
+                aircraft, approachType, runwayModel, viaFixName
+            );
+        }
 
         return aircraft.pilot.conductInstrumentApproach(aircraft, approachType, runwayModel);
     }

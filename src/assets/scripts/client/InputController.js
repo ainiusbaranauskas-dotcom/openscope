@@ -12,6 +12,7 @@ import UiController from './ui/UiController';
 import CommandParser from './commands/parsers/CommandParser';
 import ScopeCommandModel from './commands/scopeCommand/ScopeCommandModel';
 import EventTracker from './EventTracker';
+import AltitudeAnnotationMenu from './ui/AltitudeAnnotationMenu';
 import MeasureTool from './measurement/MeasureTool';
 import FixCollection from './navigationLibrary/FixCollection';
 import { clamp } from './math/core';
@@ -65,6 +66,8 @@ export default class InputController {
 
         this._coopController = null;
 
+        this._altitudeAnnotationMenu = new AltitudeAnnotationMenu();
+
         // Data block drag state
         this._isDraggingDataBlock = false;
         this._pendingDragTarget = null;
@@ -85,7 +88,7 @@ export default class InputController {
         this.$commandInput = this.$element.find(SELECTORS.DOM_SELECTORS.COMMAND);
         this.$canvases = this.$element.find(SELECTORS.DOM_SELECTORS.CANVASES);
 
-        return this.setupHandlers().enable();
+        return this.setupHandlers();
     }
 
     /**
@@ -1263,6 +1266,15 @@ export default class InputController {
 
         const mouseCanvasPos = CanvasStageModel.calculateCanvasPositionFromPagePosition(event.pageX, event.pageY);
 
+        // Check annotation hit first (more specific than general data block hit)
+        const annotationHit = this._findAnnotationHitAtCanvasPosition(mouseCanvasPos);
+
+        if (annotationHit) {
+            this._altitudeAnnotationMenu.show(annotationHit, event.pageX, event.pageY);
+
+            return;
+        }
+
         // Check if click is on a data block (for drag — only starts after movement)
         const hitRadarTarget = this._findDataBlockAtCanvasPosition(mouseCanvasPos);
 
@@ -1331,6 +1343,49 @@ export default class InputController {
             const [blockX, blockY] = radarTarget.lastDataBlockScreenPosition;
             const dx = mouseX - blockX;
             const dy = renderMouseY - blockY;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+
+            if (dist < MAX_HIT_DISTANCE && dist < closestDist) {
+                closestDist = dist;
+                closestTarget = radarTarget;
+            }
+        }
+
+        return closestTarget;
+    }
+
+    /**
+     * Find a radar target whose altitude annotation area was clicked.
+     * The annotation is the rightmost portion of data block row 1.
+     *
+     * @for InputController
+     * @method _findAnnotationHitAtCanvasPosition
+     * @param canvasPos {array} [x, y] canvas position
+     * @returns {RadarTargetModel|null}
+     * @private
+     */
+    _findAnnotationHitAtCanvasPosition(canvasPos) {
+        const radarTargetModels = this._scopeModel.radarTargetCollection.items;
+        const [mouseX, mouseY] = canvasPos;
+        const renderMouseY = -mouseY;
+        const MAX_HIT_DISTANCE = 15;
+        let closestTarget = null;
+        let closestDist = Infinity;
+
+        for (let i = 0; i < radarTargetModels.length; i++) {
+            const radarTarget = radarTargetModels[i];
+
+            if (!radarTarget._annotationScreenPosition) {
+                continue;
+            }
+
+            if (!radarTarget.aircraftModel.isVisible() || radarTarget.aircraftModel.hit) {
+                continue;
+            }
+
+            const [annX, annY] = radarTarget._annotationScreenPosition;
+            const dx = mouseX - annX;
+            const dy = renderMouseY - annY;
             const dist = Math.sqrt(dx * dx + dy * dy);
 
             if (dist < MAX_HIT_DISTANCE && dist < closestDist) {

@@ -1,0 +1,29 @@
+.altitude-annotation-menu {
+    position: absolute;
+    z-index: 1000;
+    width: 55px;
+    max-height: 200px;
+    overflow-y: auto;
+    background: rgba(10, 15, 25, 0.95);
+    border: 1px solid rgba(100, 140, 180, 0.5);
+    font-family: monoOne, monospace;
+    font-size: 11px;
+    color: #c0d0e0;
+    cursor: pointer;
+
+    .altitude-annotation-item {
+        padding: 3px 6px;
+        text-align: right;
+
+        &:hover {
+            background: rgba(60, 100, 160, 0.6);
+            color: #ffffff;
+        }
+    }
+
+    .altitude-annotation-clear {
+        text-align: center;
+        border-bottom: 1px solid rgba(100, 140, 180, 0.3);
+        color: #ff9966;
+    }
+}
