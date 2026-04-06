@@ -2415,12 +2415,12 @@ export default class AircraftModel {
                 altitudeSpeedTarget = Math.min(altitudeSpeedTarget, PERFORMANCE.APPROACH_SPEED_BELOW_6000);
             }
 
-            if (this.altitude < 4000 && distanceToAirportNm < PERFORMANCE.APPROACH_DISTANCE_THRESHOLD_NM) {
+            if (distanceToAirportNm < 12) {
                 altitudeSpeedTarget = Math.min(altitudeSpeedTarget, PERFORMANCE.APPROACH_SPEED_BELOW_4000);
             }
 
-            // Vapp: landing speed + addend, when established on approach or very close
-            if (this.isEstablishedOnCourse() || distanceToAirportNm < 8) {
+            // Vapp: landing speed + addend, when established on approach and close
+            if (this.isEstablishedOnCourse() && distanceToAirportNm < 5) {
                 const vApp = this.model.speed.landing + PERFORMANCE.APPROACH_SPEED_ADDEND;
                 altitudeSpeedTarget = Math.min(altitudeSpeedTarget, vApp);
             }

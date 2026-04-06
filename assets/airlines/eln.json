@@ -1,18 +1,18 @@
 {
-    "icao": "nax",
-    "name": "Norwegian Air Shuttle ASA",
+    "icao": "eln",
+    "name": "Air Lituanica",
     "callsign": {
-        "name": "Nor Shuttle",
+        "name": "Lituanica",
         "callsignFormats": [
-            "####",
             "###",
             "##@",
-            "#@@"
+            "####"
         ]
     },
     "fleets": {
         "default": [
-            ["B737", 10]
+            ["AT72", 5],
+            ["A320", 3]
         ]
     }
 }

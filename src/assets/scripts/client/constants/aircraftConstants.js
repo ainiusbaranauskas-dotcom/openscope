@@ -325,7 +325,7 @@ export const PERFORMANCE = {
      * @type {number}
      * @final
      */
-    APPROACH_SPEED_ADDEND: 10,
+    APPROACH_SPEED_ADDEND: 30,
 
     /**
      * Distance from airport (nm) within which the below-4000 speed gate applies
